@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 group = property("sdkGroup") as String
@@ -19,5 +20,6 @@ kotlin {
 dependencies {
     api(libs.androidx.annotation)
     api(libs.kotlinx.coroutines.core)
+    api(libs.kotlinx.serialization.json)
     testImplementation(libs.kotlin.test)
 }

@@ -16,5 +16,13 @@
                 <action android:name="org.unifiedpush.android.distributor.MESSAGE_ACK" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".LightSdkService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.thelightphone.sdk.action.BIND_SERVICE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

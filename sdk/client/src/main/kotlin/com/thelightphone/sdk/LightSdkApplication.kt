@@ -29,6 +29,7 @@ open class LightSdkApplication : Application() {
         super.onCreate()
         invokeEntryPoint()
         registerWithLightServer()
+        LightServiceConnection.bind(this)
     }
 
     // Tool may have registered an initialization function, call it

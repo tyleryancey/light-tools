@@ -58,7 +58,6 @@ class LightActivity internal constructor() : ComponentActivity() {
         val initial = factory(SealedLightActivity(this))
 
         backStack.add(initial)
-        initial.notifyWillShow()
         currentScreen.value = initial
 
         setContent {

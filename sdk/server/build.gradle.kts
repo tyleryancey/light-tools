@@ -12,6 +12,7 @@ android {
 
     defaultConfig {
         minSdk = rootProject.ext["minSdk"] as Int
+        buildConfigField("String", "SDK_VERSION", "\"$version\"")
     }
 
     buildFeatures {
