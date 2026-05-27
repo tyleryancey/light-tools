@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sdk.InitialScreen
@@ -23,9 +23,13 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.callRemoteServiceMethod
+import com.thelightphone.sdk.ui.LightIcon
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
+import com.thelightphone.sdk.ui.LightThemeController
+import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.shared.LightResult
 import com.thelightphone.sdk.shared.LightServiceMethod
 import com.thelightphone.sdk.shared.error
@@ -75,12 +79,13 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<HomeScreenVi
     override fun Content() {
         val ringtones by viewModel.ringtones.collectAsState()
         val status by viewModel.status.collectAsState()
+        val themeColors by LightThemeController.colors.collectAsState()
 
-        LightTheme {
+        LightTheme(colors = themeColors) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black)
+                    .background(LightThemeTokens.colors.background)
                     .padding(32.dp)
             ) {
                 LightText(
@@ -88,6 +93,18 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<HomeScreenVi
                     variant = LightTextVariant.Heading,
                     modifier = Modifier.padding(bottom = 16.dp),
                 )
+
+                Row(modifier = Modifier.padding(bottom = 24.dp)) {
+                    LightIcon(
+                        icon = LightIcons.SETTINGS,
+                        modifier = Modifier
+                            .padding(end = 16.dp)
+                            .clickable { LightThemeController.toggle() },
+                    )
+                    LightIcon(icon = LightIcons.CALL, modifier = Modifier.padding(end = 16.dp))
+                    LightIcon(icon = LightIcons.SEARCH, modifier = Modifier.padding(end = 16.dp))
+                    LightIcon(icon = LightIcons.TOGGLE_ON)
+                }
 
                 status?.let {
                     LightText(

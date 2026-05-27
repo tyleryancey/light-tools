@@ -3,14 +3,19 @@ package com.thelightphone.sdk.ui
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+
+fun LightColors.inferredSurfaceScheme(): LightSurfaceScheme =
+    if (background.luminance() > 0.5f) LightSurfaceScheme.Light else LightSurfaceScheme.Dark
 
 /**
  * A minimal design system inspired by LightOS.
@@ -42,11 +47,21 @@ data class LightTypography(
     val micro: TextStyle,
 )
 
-private val DefaultColors = LightColors(
-    background = Color.Black,
-    content = Color.White,
-    contentSecondary = Color(0xFFBBBBBB),
-)
+object LightThemeColors {
+    val Dark = LightColors(
+        background = Color.Black,
+        content = Color.White,
+        contentSecondary = Color(0xFFBBBBBB),
+    )
+
+    val Light = LightColors(
+        background = Color.White,
+        content = Color.Black,
+        contentSecondary = Color(0xFF666666),
+    )
+}
+
+private val DefaultColors = LightThemeColors.Dark
 
 /**
  * These values mirror the LP3 table in `LightOS/src/style/index.ts` (unscaled).
@@ -132,6 +147,7 @@ private val DefaultTypography = LightTypography(
 
 val LocalLightColors = staticCompositionLocalOf { DefaultColors }
 val LocalLightTypography = staticCompositionLocalOf { DefaultTypography }
+val LocalLightSurfaceScheme = staticCompositionLocalOf { LightSurfaceScheme.Dark }
 
 object LightThemeTokens {
     val colors: LightColors
@@ -139,35 +155,52 @@ object LightThemeTokens {
 
     val typography: LightTypography
         @Composable get() = LocalLightTypography.current
+
+    val surfaceScheme: LightSurfaceScheme
+        @Composable get() = LocalLightSurfaceScheme.current
 }
 
-private fun toMaterialColorScheme(colors: LightColors): ColorScheme {
+private fun toMaterialColorScheme(colors: LightColors, surfaceScheme: LightSurfaceScheme): ColorScheme {
     // Use MaterialTheme as a base so apps can still interop with M3 components,
     // but prefer Light* primitives for consistent visuals.
-    return darkColorScheme(
-        background = colors.background,
-        surface = colors.background,
-        onBackground = colors.content,
-        onSurface = colors.content,
-        primary = colors.content,
-        onPrimary = colors.background,
-        secondary = colors.contentSecondary,
-        onSecondary = colors.background,
-    )
+    return when (surfaceScheme) {
+        LightSurfaceScheme.Dark -> darkColorScheme(
+            background = colors.background,
+            surface = colors.background,
+            onBackground = colors.content,
+            onSurface = colors.content,
+            primary = colors.content,
+            onPrimary = colors.background,
+            secondary = colors.contentSecondary,
+            onSecondary = colors.background,
+        )
+        LightSurfaceScheme.Light -> lightColorScheme(
+            background = colors.background,
+            surface = colors.background,
+            onBackground = colors.content,
+            onSurface = colors.content,
+            primary = colors.content,
+            onPrimary = colors.background,
+            secondary = colors.contentSecondary,
+            onSecondary = colors.background,
+        )
+    }
 }
 
 @Composable
 fun LightTheme(
     colors: LightColors = DefaultColors,
     typography: LightTypography = DefaultTypography,
+    surfaceScheme: LightSurfaceScheme = colors.inferredSurfaceScheme(),
     content: @Composable () -> Unit,
 ) {
     androidx.compose.runtime.CompositionLocalProvider(
         LocalLightColors provides colors,
         LocalLightTypography provides typography,
+        LocalLightSurfaceScheme provides surfaceScheme,
     ) {
         MaterialTheme(
-            colorScheme = toMaterialColorScheme(colors),
+            colorScheme = toMaterialColorScheme(colors, surfaceScheme),
             content = content,
         )
     }
