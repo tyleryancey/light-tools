@@ -32,6 +32,12 @@ import dev.tyler.sudoku.engine.SudokuEngine
 import dev.tyler.sudoku.ui.theme.LocalSudokuPalette
 import dev.tyler.sudoku.ui.theme.SudokuPalette
 
+// Drops the default vertical font padding so a glyph occupies only its own line box.
+// On the LP3's small cells a padded line box can exceed its container, pinning the glyph
+// out of the visible band (invisible pencil marks / top-clipped digits). Shared by both
+// the main digit and pencil-mark Text so they render consistently at any cell size.
+private val NoFontPadding = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+
 @Composable
 fun Board(vm: GameViewModel, ui: GameUiState, boardSize: Dp, modifier: Modifier = Modifier) {
     val pal = LocalSudokuPalette.current
@@ -108,7 +114,9 @@ fun Board(vm: GameViewModel, ui: GameUiState, boardSize: Dp, modifier: Modifier 
                                     else -> pal.entryInk
                                 },
                                 fontSize = digitFontSize,
-                                fontWeight = if (ui.givenMask[i]) FontWeight.SemiBold else FontWeight.Medium
+                                fontWeight = if (ui.givenMask[i]) FontWeight.SemiBold else FontWeight.Medium,
+                                lineHeight = digitFontSize,
+                                style = NoFontPadding,
                             )
                         } else {
                             val mask = if (ui.autoCandidate) {
@@ -138,12 +146,10 @@ private fun PencilMarks(mask: Int, dark: Boolean, pal: SudokuPalette, fontSize: 
                                 d.toString(),
                                 color = if (dark) pal.selInk else pal.pencilInk,
                                 fontSize = fontSize,
-                                // A pencil mark lives in a ~1/3-cell box; the default line height +
-                                // font padding make even a floored font's layout box taller than the
-                                // container, so the glyph measures out of view and draws nothing. Pin
-                                // the line box to the glyph so it fits and renders.
+                                // A pencil mark lives in a ~1/3-cell box; pin the line box to the
+                                // glyph (see NoFontPadding) so it fits and renders.
                                 lineHeight = fontSize,
-                                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                                style = NoFontPadding,
                             )
                     }
                 }
