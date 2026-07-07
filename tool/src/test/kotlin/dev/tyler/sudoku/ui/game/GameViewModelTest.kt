@@ -126,6 +126,22 @@ class GameViewModelTest {
         assertTrue(vm.ui.value.running)
     }
 
+    @Test fun timerResumesAfterBackgroundWithSheetOpen() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.showSettings()
+        assertTrue(vm.ui.value.running, "an open sheet alone does not stop the timer")
+        vm.onAppPause(); advanceUntilIdle()
+        assertFalse(vm.ui.value.running)
+        vm.resumeFromShow()
+        assertTrue(vm.ui.value.running, "timer restarts on return even with a sheet open")
+        // explicit pause still wins across a background round-trip
+        vm.dismissOverlay()
+        vm.pauseTapped(); advanceUntilIdle()
+        vm.onAppPause(); advanceUntilIdle()
+        vm.resumeFromShow()
+        assertFalse(vm.ui.value.running, "Paused overlay keeps the timer stopped")
+    }
+
     @Test fun solvingLegitimatelyWinsChimesAndMarksIndexDone() = runTest {
         val vm = vm(); advanceUntilIdle()
         val ui = vm.ui.value
@@ -165,6 +181,18 @@ class GameViewModelTest {
         val ix = Codecs.decodeIndex(store.map[StoreKeys.INDEX])
         assertEquals("done", ix["2026-06-16:easy"]!!.status)
         assertEquals(null, ix["2026-06-16:easy"]!!.time)
+    }
+
+    @Test fun implicitPersistAfterRevealNeverStampsASolveTime() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        clock = 60_000L
+        vm.requestRevealPuzzle()
+        vm.confirmRevealPuzzle(); advanceUntilIdle()
+        // a later background/pop persist must not rewrite the revealed entry with a time
+        vm.persistProgress(); advanceUntilIdle()
+        val e = Codecs.decodeIndex(store.map[StoreKeys.INDEX])["2026-06-16:easy"]!!
+        assertEquals("done", e.status)
+        assertEquals(null, e.time, "revealed puzzle must never gain a solve time")
     }
 
     @Test fun candidateModeTogglesPencilBit() = runTest {

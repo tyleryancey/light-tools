@@ -15,6 +15,7 @@ import dev.tyler.sudoku.feedback.SolveFeedback
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -152,7 +153,10 @@ class GameViewModel(
     override fun onAppPause() { pauseForBackground() }
 
     fun resumeFromShow() {
-        if (!s.generating && !s.solved && s.overlay == null) startTimer()
+        // Menu/settings/help/confirm sheets don't pause the game — the timer keeps
+        // running under them — so returning from background must restart it even
+        // with one open. Only an explicit pause (or solved/generating) keeps it off.
+        if (!s.generating && !s.solved && s.overlay != Overlay.Paused) startTimer()
     }
 
     private fun pauseForBackground() {
@@ -222,7 +226,20 @@ class GameViewModel(
     // ---------- persistence ----------
     private var persistJob: Job? = null
 
-    fun persistProgress() {
+    fun persistProgress() = persistProgressWith(null)
+
+    /**
+     * Persist the board, then update the archive index, in ONE coroutine.
+     *
+     * NonCancellable: popping the screen clears the ViewModelStore synchronously,
+     * which cancels viewModelScope mid-write — without the shield, a digit entered
+     * just before backing out (or the last timer seconds) is silently dropped.
+     *
+     * [explicit] (win/reveal/reset) is written unconditionally and in-order; as a
+     * separate launch it raced the done-guard below, which could stamp a solve
+     * time onto a revealed puzzle's index entry.
+     */
+    private fun persistProgressWith(explicit: IndexEntry?) {
         if (s.generating) return
         val p = ProgressDto(
             v = s.values.toList(), c = s.candidates.toList(),
@@ -231,13 +248,19 @@ class GameViewModel(
             s = if (s.solved) 1 else 0, r = if (s.usedReveal) 1 else 0,
         )
         viewModelScope.launch {
-            store.set(StoreKeys.progress(dateKey, difficulty), Codecs.encodeProgress(p))
-            val cur = Codecs.decodeIndex(store.get(StoreKeys.INDEX))["$dateKey:$difficulty"]
-            if (cur?.status != "done") {
-                writeIndex(
-                    when { s.solved -> "done"; isStarted() -> "progress"; else -> "new" },
-                    if (s.solved) elapsedSec() else null,
-                )
+            withContext(NonCancellable) {
+                store.set(StoreKeys.progress(dateKey, difficulty), Codecs.encodeProgress(p))
+                if (explicit != null) {
+                    writeIndex(explicit.status, explicit.time)
+                } else {
+                    val cur = Codecs.decodeIndex(store.get(StoreKeys.INDEX))["$dateKey:$difficulty"]
+                    if (cur?.status != "done") {
+                        writeIndex(
+                            when { s.solved -> "done"; isStarted() -> "progress"; else -> "new" },
+                            if (s.solved) elapsedSec() else null,
+                        )
+                    }
+                }
             }
         }
     }
@@ -428,8 +451,7 @@ class GameViewModel(
             checkErr = BooleanArray(81), usedReveal = true, solved = true,
             undo = emptyList(), selected = -1, overlay = null,
         )
-        viewModelScope.launch { writeIndex("done", null) }
-        persistProgress()
+        persistProgressWith(IndexEntry("done", null))
         toast("Puzzle revealed")
     }
 
@@ -441,8 +463,7 @@ class GameViewModel(
             solved = false, usedReveal = false, selected = -1, elapsedSec = 0,
             running = false, overlay = null,
         )
-        viewModelScope.launch { writeIndex("new", null) }
-        persistProgress()
+        persistProgressWith(IndexEntry("new", null))
         startTimer()
     }
 
@@ -459,8 +480,7 @@ class GameViewModel(
             overlay = Overlay.Win(fmtTime(sec), subtitle),
         )
         if (s.settings.sound) runCatching { playChime() }
-        viewModelScope.launch { writeIndex("done", sec) }
-        persistProgress()
+        persistProgressWith(IndexEntry("done", sec))
     }
 
     // ---------- conflicts (computed for rendering) ----------
