@@ -11,7 +11,16 @@ import kotlin.test.assertTrue
 class EngineTest {
 
     private val dates = listOf("2026-06-16", "2026-06-17", "2026-01-01", "2025-12-25")
-    private val bands = mapOf("easy" to 1..2, "medium" to 3..4, "hard" to 5..7)
+
+    // Pinned from the verified engine.js ground truth (Node, 2026-07-06). Hard can grade below its
+    // nominal 5..7 band when the generator's 40 attempts find nothing in-band and it falls back to
+    // the nearest — matching the JS behavior exactly IS the contract.
+    private val expected = mapOf(
+        "2026-06-16" to mapOf("easy" to (40 to 1), "medium" to (28 to 4), "hard" to (25 to 5)),
+        "2026-06-17" to mapOf("easy" to (40 to 1), "medium" to (28 to 3), "hard" to (24 to 4)),
+        "2026-01-01" to mapOf("easy" to (40 to 1), "medium" to (28 to 3), "hard" to (26 to 4)),
+        "2025-12-25" to mapOf("easy" to (40 to 1), "medium" to (28 to 3), "hard" to (25 to 5)),
+    )
 
     @Test fun puzzlesAreUniqueSolvableAndGraded() {
         for (date in dates) for (diff in listOf("easy", "medium", "hard")) {
@@ -23,9 +32,19 @@ class EngineTest {
             assertTrue(p.solution.all { it in 1..9 }, "$date/$diff solution must be complete")
             // solvable by human technique (no guessing required)
             assertTrue(p.solvableLogically, "$date/$diff must be logically solvable")
-            // graded into the right difficulty band
-            assertTrue(p.maxTier in bands[diff]!!, "$date/$diff tier ${p.maxTier} should fall in ${bands[diff]}")
+            // exact ground truth from the verified engine.js
+            val (expClues, expTier) = expected[date]!![diff]!!
+            assertEquals(expClues, p.clues, "$date/$diff clues")
+            assertEquals(expTier, p.maxTier, "$date/$diff tier")
         }
+    }
+
+    @Test fun matchesVerifiedJsEngineExactly() {
+        // First 20 cells pinned from engine.js output for two seeds.
+        val easy = SudokuEngine.generatePuzzle("2026-06-16", "easy")
+        assertEquals("1,0,2,0,0,7,3,9,0,0,0,3,0,2,9,8,0,0,0,7", easy.puzzle.take(20).joinToString(","))
+        val hard = SudokuEngine.generatePuzzle("2026-06-17", "hard")
+        assertEquals("0,0,9,0,5,3,0,0,4,0,5,0,0,0,0,8,0,0,7,4", hard.puzzle.take(20).joinToString(","))
     }
 
     @Test fun clueCountsSeparateDifficulty() {
