@@ -21,6 +21,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -40,9 +42,12 @@ fun Board(vm: GameViewModel, ui: GameUiState, boardSize: Dp, modifier: Modifier 
     // Digit/pencil sizes scale with the actual cell size (boardSize/9) rather than a fixed
     // sp value, so the board stays legible on screens too small for the original ~49dp-cell
     // calibration (ratio matches that calibration: 24sp / 49dp given ~= 0.49).
+    // Pencil marks additionally get an absolute floor: at 0.2 the LP3's ~12.6dp cell yields
+    // ~2.5sp marks that render invisibly, so we clamp to a legible minimum (~9px) that still
+    // fits a 1/3-cell subgrid box. Normal-sized cells (>=17.5dp) keep the original 0.2 ratio.
     val cellSize = boardSize / 9
     val digitFontSize = (cellSize.value * 0.49f).sp
-    val pencilFontSize = (cellSize.value * 0.2f).sp
+    val pencilFontSize = maxOf(cellSize.value * 0.2f, 3.6f).sp
 
     Column(
         modifier
@@ -129,7 +134,17 @@ private fun PencilMarks(mask: Int, dark: Boolean, pal: SudokuPalette, fontSize: 
                     val d = br * 3 + bc + 1
                     Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                         if (mask and (1 shl (d - 1)) != 0)
-                            Text(d.toString(), color = if (dark) pal.selInk else pal.pencilInk, fontSize = fontSize)
+                            Text(
+                                d.toString(),
+                                color = if (dark) pal.selInk else pal.pencilInk,
+                                fontSize = fontSize,
+                                // A pencil mark lives in a ~1/3-cell box; the default line height +
+                                // font padding make even a floored font's layout box taller than the
+                                // container, so the glyph measures out of view and draws nothing. Pin
+                                // the line box to the glyph so it fits and renders.
+                                lineHeight = fontSize,
+                                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                            )
                     }
                 }
             }
