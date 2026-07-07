@@ -125,4 +125,143 @@ class GameViewModelTest {
         assertEquals(null, vm.ui.value.overlay)
         assertTrue(vm.ui.value.running)
     }
+
+    @Test fun solvingLegitimatelyWinsChimesAndMarksIndexDone() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        // enable sound so the chime fires
+        vm.toggleSetting("sound"); advanceUntilIdle()
+        clock = 90_000L
+        for (i in 0 until 81) if (!ui.givenMask[i]) {
+            vm.select(i); vm.input(ui.solution[i])
+        }
+        advanceUntilIdle()
+        val end = vm.ui.value
+        assertTrue(end.solved)
+        assertTrue(end.overlay is Overlay.Win)
+        assertEquals("1:30", (end.overlay as Overlay.Win).timeText)
+        assertEquals(1, chimes)
+        assertFalse(end.running)
+        val ix = Codecs.decodeIndex(store.map[StoreKeys.INDEX])
+        assertEquals("done", ix["2026-06-16:easy"]!!.status)
+        assertEquals(90, ix["2026-06-16:easy"]!!.time)
+    }
+
+    @Test fun revealPuzzleBlocksWinCelebration() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.toggleSetting("sound"); advanceUntilIdle()
+        vm.requestRevealPuzzle()
+        assertEquals(Overlay.ConfirmReveal, vm.ui.value.overlay)
+        vm.confirmRevealPuzzle()
+        // assert the toast BEFORE advanceUntilIdle — the 1700ms auto-clear runs on virtual time
+        assertEquals("Puzzle revealed", vm.ui.value.toast)
+        advanceUntilIdle()
+        val end = vm.ui.value
+        assertTrue(end.solved)
+        assertTrue(end.usedReveal)
+        assertEquals(0, chimes, "reveal must not chime")
+        assertTrue(end.overlay !is Overlay.Win)
+        // index done with no time
+        val ix = Codecs.decodeIndex(store.map[StoreKeys.INDEX])
+        assertEquals("done", ix["2026-06-16:easy"]!!.status)
+        assertEquals(null, ix["2026-06-16:easy"]!!.time)
+    }
+
+    @Test fun candidateModeTogglesPencilBit() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = (0 until 81).first { !vm.ui.value.givenMask[it] }
+        vm.setMode(InputMode.CANDIDATE)
+        vm.select(i)
+        vm.input(3); advanceUntilIdle()
+        assertEquals(1 shl 2, vm.ui.value.candidates[i])
+        vm.input(3); advanceUntilIdle()
+        assertEquals(0, vm.ui.value.candidates[i])
+        assertEquals(0, vm.ui.value.values[i], "candidate mode never places values")
+    }
+
+    @Test fun undoRestoresPriorCellState() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = (0 until 81).first { !vm.ui.value.givenMask[it] }
+        vm.select(i); vm.input(7); advanceUntilIdle()
+        assertEquals(7, vm.ui.value.values[i])
+        vm.undo(); advanceUntilIdle()
+        assertEquals(0, vm.ui.value.values[i])
+        assertEquals(i, vm.ui.value.selected, "undo re-selects the affected cell")
+    }
+
+    @Test fun inputClearsDigitFromPeerPencilMarks() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        // find two empty cells in the same row
+        val row = (0 until 9).first { r -> (0 until 9).count { !ui.givenMask[r * 9 + it] } >= 2 }
+        val cells = (0 until 9).map { row * 9 + it }.filter { !ui.givenMask[it] }
+        val (a, b) = cells[0] to cells[1]
+        vm.setMode(InputMode.CANDIDATE); vm.select(b); vm.input(4)
+        vm.setMode(InputMode.NORMAL); vm.select(a); vm.input(4)
+        advanceUntilIdle()
+        assertEquals(0, vm.ui.value.candidates[b] and (1 shl 3), "peer pencil 4 cleared")
+    }
+
+    @Test fun fillHintLocksCellAndToasts() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.fillHint()
+        // toast asserted before advanceUntilIdle (virtual-time auto-clear)
+        assertEquals("Filled one square for you", vm.ui.value.toast)
+        advanceUntilIdle()
+        val ui = vm.ui.value
+        val locked = (0 until 81).filter { ui.lockedMask[it] }
+        assertEquals(1, locked.size)
+        assertEquals(ui.solution[locked[0]], ui.values[locked[0]])
+    }
+
+    @Test fun checkPuzzleCountsWrongEntries() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        val i = (0 until 81).first { !ui.givenMask[it] }
+        val wrong = if (ui.solution[i] == 1) 2 else 1
+        vm.select(i); vm.input(wrong)
+        vm.checkPuzzle()
+        // toast asserted before advanceUntilIdle (virtual-time auto-clear)
+        assertEquals("1 number is off", vm.ui.value.toast)
+        advanceUntilIdle()
+        assertTrue(vm.ui.value.checkErr[i])
+    }
+
+    @Test fun conflictsFlagsDuplicatesInRow() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        val row = (0 until 9).first { r -> (0 until 9).count { !ui.givenMask[r * 9 + it] } >= 2 }
+        val cells = (0 until 9).map { row * 9 + it }.filter { !ui.givenMask[it] }
+        vm.select(cells[0]); vm.input(9)
+        vm.select(cells[1]); vm.input(9)
+        val bad = vm.conflicts()
+        assertTrue(bad[cells[0]] && bad[cells[1]])
+    }
+
+    @Test fun resetRestoresCluesAndZeroesTimer() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = (0 until 81).first { !vm.ui.value.givenMask[it] }
+        vm.select(i); vm.input(5)
+        clock = 30_000L
+        vm.requestReset()
+        assertEquals(Overlay.ConfirmReset, vm.ui.value.overlay)
+        vm.confirmReset(); advanceUntilIdle()
+        val end = vm.ui.value
+        assertEquals(0, end.values[i])
+        assertEquals(0, end.elapsedSec)
+        assertTrue(end.running, "reset restarts the timer")
+        assertFalse(end.solved)
+    }
+
+    @Test fun overlayBackNavigation() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.showMenu()
+        vm.showHintPage()
+        assertEquals(Overlay.HintPage, vm.ui.value.overlay)
+        assertTrue(vm.onBackPressed(), "hint page consumes back")
+        assertEquals(Overlay.Menu, vm.ui.value.overlay, "…stepping back to the menu")
+        assertTrue(vm.onBackPressed(), "menu consumes back")
+        assertEquals(null, vm.ui.value.overlay)
+        assertFalse(vm.onBackPressed(), "no overlay: back pops the screen")
+    }
 }
