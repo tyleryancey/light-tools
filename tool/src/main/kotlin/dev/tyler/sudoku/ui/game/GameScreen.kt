@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -70,8 +71,13 @@ class GameScreen(
                 TopBar(ui)
                 Box(Modifier.fillMaxWidth().height(1.dp).background(pal.hair))
                 StatusRow(ui)
-                Board(viewModel, ui, Modifier.padding(top = 8.dp))
-                Spacer(Modifier.weight(1f))
+                BoxWithConstraints(
+                    Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val boardSize = minOf(maxWidth, maxHeight)
+                    Board(viewModel, ui, boardSize, Modifier.size(boardSize))
+                }
                 Controls(ui)
                 Spacer(Modifier.height(16.dp))
             }

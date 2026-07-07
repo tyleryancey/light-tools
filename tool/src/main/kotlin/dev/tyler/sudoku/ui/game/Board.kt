@@ -22,6 +22,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.tyler.sudoku.engine.SudokuEngine
@@ -29,16 +31,22 @@ import dev.tyler.sudoku.ui.theme.LocalSudokuPalette
 import dev.tyler.sudoku.ui.theme.SudokuPalette
 
 @Composable
-fun Board(vm: GameViewModel, ui: GameUiState, modifier: Modifier = Modifier) {
+fun Board(vm: GameViewModel, ui: GameUiState, boardSize: Dp, modifier: Modifier = Modifier) {
     val pal = LocalSudokuPalette.current
     val conflicts = vm.conflicts()
     val sel = ui.selected
     val selVal = if (sel >= 0) ui.values[sel] else 0
     val st = ui.settings
+    // Digit/pencil sizes scale with the actual cell size (boardSize/9) rather than a fixed
+    // sp value, so the board stays legible on screens too small for the original ~49dp-cell
+    // calibration (ratio matches that calibration: 24sp / 49dp given ~= 0.49).
+    val cellSize = boardSize / 9
+    val digitFontSize = (cellSize.value * 0.49f).sp
+    val pencilFontSize = (cellSize.value * 0.2f).sp
 
     Column(
         modifier
-            .aspectRatio(1f)
+            .aspectRatio(1f, matchHeightConstraintsFirst = true)
             .border(2.dp, pal.frame)
     ) {
         for (r in 0 until 9) {
@@ -94,7 +102,7 @@ fun Board(vm: GameViewModel, ui: GameUiState, modifier: Modifier = Modifier) {
                                     fixed -> pal.givenInk
                                     else -> pal.entryInk
                                 },
-                                fontSize = 24.sp,
+                                fontSize = digitFontSize,
                                 fontWeight = if (ui.givenMask[i]) FontWeight.SemiBold else FontWeight.Medium
                             )
                         } else {
@@ -103,7 +111,7 @@ fun Board(vm: GameViewModel, ui: GameUiState, modifier: Modifier = Modifier) {
                                 for (d in SudokuEngine.autoCandidates(ui.values, i)) m = m or (1 shl (d - 1))
                                 m
                             } else ui.candidates[i]
-                            if (mask != 0) PencilMarks(mask, dark = i == sel, pal = pal)
+                            if (mask != 0) PencilMarks(mask, dark = i == sel, pal = pal, fontSize = pencilFontSize)
                         }
                     }
                 }
@@ -113,7 +121,7 @@ fun Board(vm: GameViewModel, ui: GameUiState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PencilMarks(mask: Int, dark: Boolean, pal: SudokuPalette) {
+private fun PencilMarks(mask: Int, dark: Boolean, pal: SudokuPalette, fontSize: TextUnit) {
     Column(Modifier.fillMaxSize()) {
         for (br in 0 until 3) {
             Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -121,7 +129,7 @@ private fun PencilMarks(mask: Int, dark: Boolean, pal: SudokuPalette) {
                     val d = br * 3 + bc + 1
                     Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                         if (mask and (1 shl (d - 1)) != 0)
-                            Text(d.toString(), color = if (dark) pal.selInk else pal.pencilInk, fontSize = 10.sp)
+                            Text(d.toString(), color = if (dark) pal.selInk else pal.pencilInk, fontSize = fontSize)
                     }
                 }
             }
