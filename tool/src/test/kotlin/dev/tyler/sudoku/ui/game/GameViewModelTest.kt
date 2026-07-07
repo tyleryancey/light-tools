@@ -38,7 +38,7 @@ class GameViewModelTest {
     @AfterTest fun tearDown() { Dispatchers.resetMain() }
 
     private fun vm(date: String = "2026-06-16", diff: String = "easy") =
-        GameViewModel(date, diff, store, playChime = { chimes++ }, now = { clock })
+        GameViewModel(date, diff, store, playChime = { chimes++ }, now = { clock }, generationDispatcher = dispatcher)
 
     @Test fun openGeneratesCachesAndStartsTimer() = runTest {
         val vm = vm(); advanceUntilIdle()

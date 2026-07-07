@@ -12,11 +12,14 @@ import dev.tyler.sudoku.data.Settings
 import dev.tyler.sudoku.data.StoreKeys
 import dev.tyler.sudoku.engine.SudokuEngine
 import dev.tyler.sudoku.feedback.SolveFeedback
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class InputMode { NORMAL, CANDIDATE }
 
@@ -68,6 +71,7 @@ class GameViewModel(
     private val store: KeyValueStore,
     private val playChime: () -> Unit = SolveFeedback::playChime,
     private val now: () -> Long = System::currentTimeMillis,
+    private val generationDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : LightViewModel<GameResult>() {
 
     private val _ui = MutableStateFlow(GameUiState(dateKey = dateKey, difficulty = difficulty))
@@ -85,21 +89,9 @@ class GameViewModel(
     private suspend fun open() {
         val settings = Codecs.decodeSettings(store.get(StoreKeys.SETTINGS))
         val cacheKey = StoreKeys.puzzle(dateKey, difficulty)
-        // NOTE (deviation from brief): the brief's listing wraps this in
-        // withContext(Dispatchers.Default) to keep the backtracking generator off the
-        // Main thread. Under kotlinx-coroutines-test's StandardTestDispatcher,
-        // advanceUntilIdle() only drains the virtual scheduler; a real dispatcher hop
-        // here suspends the coroutine on a thread the virtual clock can't see or wait
-        // for, so `generating` never flips to false and the exact test file given
-        // (Step 1, unmodified) deterministically fails 6-7/7 times, not flakily.
-        // Inlining keeps the fixed public constructor (no injectable dispatcher param,
-        // which Tasks 7/9-11 depend on staying stable) and makes the given tests pass.
-        // Trade-off: puzzle generation now runs synchronously on viewModelScope's
-        // dispatcher (Main in production), so a slow generation could jank the UI
-        // while `generating` is true. A later task could reintroduce off-thread
-        // generation by adding a test-injectable dispatcher parameter.
-        val p = Codecs.decodePuzzle(store.get(cacheKey)) ?: SudokuEngine.generatePuzzle(dateKey, difficulty)
-            .also { store.set(cacheKey, Codecs.encodePuzzle(it)) }
+        val p = Codecs.decodePuzzle(store.get(cacheKey)) ?: withContext(generationDispatcher) {
+            SudokuEngine.generatePuzzle(dateKey, difficulty)
+        }.also { store.set(cacheKey, Codecs.encodePuzzle(it)) }
 
         val given = BooleanArray(81) { p.puzzle[it] != 0 }
         clueLayout = p.puzzle.copyOf()
