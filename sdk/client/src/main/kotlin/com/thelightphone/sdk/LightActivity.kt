@@ -114,7 +114,11 @@ class LightActivity internal constructor() : ComponentActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    goBack()
+                    // Route through the screen so goBack() overrides run — a
+                    // LightScreen consults its view model's onBackPressed()
+                    // (e.g. to close an overlay) before the stack pops.
+                    val screen = currentScreen.value?.screen
+                    if (screen != null) screen.requestBack() else goBack()
                 }
             }
         )

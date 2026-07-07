@@ -47,6 +47,15 @@ abstract class SimpleLightScreen<ResultType>(sealedActivity: SealedLightActivity
         this.result = result
         activity.goBack()
     }
+
+    /**
+     * System back lands here so [goBack] overrides can intercept it — e.g.
+     * [LightScreen] consults its view model's onBackPressed() before popping.
+     * Non-generic so [LightActivity] can call it on a star-projected screen.
+     */
+    internal fun requestBack() {
+        goBack(null)
+    }
 }
 
 abstract class LightScreen<ResultType, VM : LightViewModel<ResultType>>(
