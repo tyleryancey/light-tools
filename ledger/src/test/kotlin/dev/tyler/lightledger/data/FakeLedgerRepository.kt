@@ -77,7 +77,8 @@ class FakeLedgerRepository : LedgerRepository {
 
     override suspend fun listTransactions(month: YearMonth): List<Transaction> {
         val range = LedgerMath.epochDayRange(month)
-        return transactions.filter { it.postedEpochDay in range }.sortedByDescending { it.postedEpochDay }
+        return transactions.filter { it.postedEpochDay in range }
+            .sortedWith(compareByDescending<Transaction> { it.postedEpochDay }.thenByDescending { it.id })
     }
 
     override suspend fun getTransaction(id: Long): Transaction? = transactions.firstOrNull { it.id == id }

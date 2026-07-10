@@ -6,6 +6,8 @@ import dev.tyler.lightledger.domain.TransactionAmount
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class RoomLedgerRepository private constructor(
@@ -14,14 +16,17 @@ class RoomLedgerRepository private constructor(
     private val accountDao = database.accountDao()
     private val transactionDao = database.transactionDao()
     private val categoryDao = database.categoryDao()
+    private val seedMutex = Mutex()
 
     override suspend fun ensureSeeded() = withContext(Dispatchers.IO) {
-        if (accountDao.count() == 0) {
-            accountDao.insert(AccountEntity(name = "Cash", kind = AccountKind.MANUAL, currency = DEFAULT_CURRENCY))
-        }
-        if (categoryDao.count() == 0) {
-            DEFAULT_CATEGORIES.forEachIndexed { index, name ->
-                categoryDao.insert(CategoryEntity(name = name, sortOrder = index))
+        seedMutex.withLock {
+            if (accountDao.count() == 0) {
+                accountDao.insert(AccountEntity(name = "Cash", kind = AccountKind.MANUAL, currency = DEFAULT_CURRENCY))
+            }
+            if (categoryDao.count() == 0) {
+                DEFAULT_CATEGORIES.forEachIndexed { index, name ->
+                    categoryDao.insert(CategoryEntity(name = name, sortOrder = index))
+                }
             }
         }
     }
