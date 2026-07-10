@@ -951,13 +951,13 @@ import kotlin.test.assertEquals
 
 class LedgerMathTest {
     @Test fun epochDayRangeCoversFullMonth() {
-        val range = LedgerMath.epochDayRange(YearMonth.of(2026, 2, 1))
+        val range = LedgerMath.epochDayRange(YearMonth.of(2026, 2))
         assertEquals(LocalDate.of(2026, 2, 1).toEpochDay(), range.first)
         assertEquals(LocalDate.of(2026, 2, 28).toEpochDay(), range.last)
     }
 
     @Test fun epochDayRangeHandlesYearWrap() {
-        val range = LedgerMath.epochDayRange(YearMonth.of(2025, 12, 1))
+        val range = LedgerMath.epochDayRange(YearMonth.of(2025, 12))
         assertEquals(LocalDate.of(2025, 12, 1).toEpochDay(), range.first)
         assertEquals(LocalDate.of(2025, 12, 31).toEpochDay(), range.last)
     }
