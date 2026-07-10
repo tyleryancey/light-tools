@@ -119,11 +119,7 @@ fun Board(vm: GameViewModel, ui: GameUiState, boardSize: Dp, modifier: Modifier 
                                 style = NoFontPadding,
                             )
                         } else {
-                            val mask = if (ui.autoCandidate) {
-                                var m = 0
-                                for (d in SudokuEngine.autoCandidates(ui.values, i)) m = m or (1 shl (d - 1))
-                                m
-                            } else ui.candidates[i]
+                            val mask = vm.pencilMask(i)
                             if (mask != 0) PencilMarks(mask, dark = i == sel, pal = pal, fontSize = pencilFontSize)
                         }
                     }

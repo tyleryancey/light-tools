@@ -51,46 +51,46 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
     override fun Content() {
         SudokuSurface {
             val pal = LocalSudokuPalette.current
-            // Spacing calibrated to the LP3's short (~472dp) panel so the date and
-            // "Past puzzles" stay on-screen; verticalScroll keeps them reachable on
-            // any still-shorter configuration (e.g. large font scale).
+            // Spacing tightened so the whole screen — including the date and "Past puzzles" —
+            // fits the LP3's short (~472dp) panel without scrolling; verticalScroll stays as a
+            // safety net for still-shorter configurations (e.g. large font scale).
             Column(
                 Modifier.fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 28.dp, vertical = 20.dp),
+                    .padding(horizontal = 28.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text("Sudoku", color = pal.txt, fontSize = 40.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "A quiet numbers game. No clock pressure, no streaks.",
                     color = pal.txt, fontSize = 18.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(max = 260.dp),
                 )
-                Spacer(Modifier.height(24.dp))
-                Text("CHOOSE YOUR PUZZLE", color = pal.txtDim, fontSize = 13.sp, letterSpacing = 2.sp)
                 Spacer(Modifier.height(14.dp))
+                Text("CHOOSE YOUR PUZZLE", color = pal.txtDim, fontSize = 13.sp, letterSpacing = 2.sp)
+                Spacer(Modifier.height(10.dp))
 
                 listOf("easy" to "Easy", "medium" to "Medium", "hard" to "Hard").forEach { (key, label) ->
                     Box(
-                        Modifier.fillMaxWidth().widthIn(max = 300.dp).padding(vertical = 5.dp)
+                        Modifier.fillMaxWidth().widthIn(max = 300.dp).padding(vertical = 4.dp)
                             .clip(RoundedCornerShape(34.dp))
                             .border(2.dp, pal.frame, RoundedCornerShape(34.dp))
                             .clickable { openGame(key) }
-                            .height(52.dp),
+                            .height(48.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(label, color = pal.txt, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     DateKeys.today(System.currentTimeMillis()),
                     color = pal.txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "Past puzzles", color = pal.txtDim, fontSize = 15.sp,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp))

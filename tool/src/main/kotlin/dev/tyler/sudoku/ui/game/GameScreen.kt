@@ -70,16 +70,17 @@ class GameScreen(
             Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 TopBar(ui)
                 Box(Modifier.fillMaxWidth().height(1.dp).background(pal.hair))
-                StatusRow(ui)
+                // The board takes all space the compacted controls leave; on the LP3's short,
+                // near-square panel that leftover height is what caps the (square) board.
                 BoxWithConstraints(
-                    Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp),
+                    Modifier.weight(1f).fillMaxWidth().padding(vertical = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     val boardSize = minOf(maxWidth, maxHeight)
                     Board(viewModel, ui, boardSize, Modifier.size(boardSize))
                 }
                 Controls(ui)
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(8.dp))
             }
 
             // transient chrome
@@ -93,19 +94,32 @@ class GameScreen(
         }
     }
 
+    // Top bar carries the difficulty label and (when enabled) the timer + pause, so no
+    // separate status row is needed — that reclaims vertical space for the board.
     @Composable
     private fun TopBar(ui: GameUiState) {
         val pal = LocalSudokuPalette.current
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconGlyph("‹", "Back") { goBack(GameResult.Closed) }
+            Spacer(Modifier.width(2.dp))
+            Text(
+                ui.difficulty.replaceFirstChar { it.uppercase() },
+                color = pal.txtDim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            )
             Spacer(Modifier.weight(1f))
+            if (ui.settings.timer) {
+                Text(
+                    viewModel.fmtTime(ui.elapsedSec),
+                    color = pal.txt, fontSize = 15.sp, fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.width(4.dp))
+                IconGlyph("❚❚", "Pause") { viewModel.pauseTapped() }
+            }
             IconGlyph("?", "How to play") { viewModel.showHelp() }
-            Spacer(Modifier.width(16.dp))
             IconGlyph("⚙", "Settings") { viewModel.showSettings() }
-            Spacer(Modifier.width(16.dp))
             IconGlyph("⋯", "More") { viewModel.showMenu() }
         }
     }
@@ -122,44 +136,25 @@ class GameScreen(
     }
 
     @Composable
-    private fun StatusRow(ui: GameUiState) {
-        val pal = LocalSudokuPalette.current
-        Row(
-            Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                ui.difficulty.replaceFirstChar { it.uppercase() },
-                color = pal.txtDim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.weight(1f))
-            if (ui.settings.timer) {
-                Text(
-                    viewModel.fmtTime(ui.elapsedSec),
-                    color = pal.txt, fontSize = 16.sp, fontFamily = FontFamily.Monospace,
-                )
-                Spacer(Modifier.width(10.dp))
-                IconGlyph("❚❚", "Pause") { viewModel.pauseTapped() }
-            }
-        }
-    }
-
-    @Composable
     private fun Controls(ui: GameUiState) {
         val pal = LocalSudokuPalette.current
-        // Normal | Candidate segmented control + Undo
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        // One compact row: Normal | Candidate switcher + Auto candidate toggle + Undo.
+        // The switcher stays lit and usable even with auto candidate mode on — auto only
+        // changes which candidate layer is shown, not whether you can switch/enter.
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(pal.btn),
             ) {
-                SegButton("Normal", ui.mode == InputMode.NORMAL && !ui.autoCandidate) {
+                SegButton("Normal", ui.mode == InputMode.NORMAL) {
                     viewModel.setMode(InputMode.NORMAL)
                 }
-                SegButton("Candidate", ui.mode == InputMode.CANDIDATE && !ui.autoCandidate) {
+                SegButton("Candidate", ui.mode == InputMode.CANDIDATE) {
                     viewModel.setMode(InputMode.CANDIDATE)
                 }
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
+            AutoToggle(ui.autoCandidate) { viewModel.toggleAutoCandidate() }
+            Spacer(Modifier.width(8.dp))
             val undoEnabled = ui.undo.isNotEmpty() && !ui.solved
             Text(
                 "Undo",
@@ -168,15 +163,15 @@ class GameScreen(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable(enabled = undoEnabled) { viewModel.undo() }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             )
         }
 
-        // numpad 1..9 + erase; dim digits placed 9 times
+        // numpad 1..9 + erase; dim digits placed 9 times. Keys stay full-width & >=48dp tall.
         val counts = IntArray(10)
         for (v in ui.values) if (v != 0) counts[v]++
         Row(
-            Modifier.fillMaxWidth().padding(top = 10.dp),
+            Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             for (d in 1..5) NumKey(d, counts[d] >= 9, Modifier.weight(1f))
@@ -187,31 +182,31 @@ class GameScreen(
         ) {
             for (d in 6..9) NumKey(d, counts[d] >= 9, Modifier.weight(1f))
             Box(
-                Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(10.dp))
+                Modifier.weight(1f).height(50.dp).clip(RoundedCornerShape(10.dp))
                     .background(pal.btn).clickable { viewModel.erase() },
                 contentAlignment = Alignment.Center,
             ) { Text("✕", color = pal.txt, fontSize = 18.sp) }
         }
+    }
 
-        // auto candidate row
+    // Compact labeled checkbox for auto candidate mode; sits inline with the mode switcher.
+    @Composable
+    private fun AutoToggle(on: Boolean, onClick: () -> Unit) {
+        val pal = LocalSudokuPalette.current
         Row(
-            Modifier.fillMaxWidth().padding(top = 12.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { viewModel.toggleAutoCandidate() }
-                .padding(vertical = 8.dp),
+            Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
         ) {
-            val pal2 = LocalSudokuPalette.current
             Box(
-                Modifier.size(20.dp).clip(RoundedCornerShape(5.dp))
-                    .background(if (ui.autoCandidate) pal2.txt else pal2.btn),
+                Modifier.size(18.dp).clip(RoundedCornerShape(5.dp))
+                    .background(if (on) pal.txt else pal.btn),
                 contentAlignment = Alignment.Center,
             ) {
-                if (ui.autoCandidate) Text("✓", color = pal2.bg, fontSize = 12.sp)
+                if (on) Text("✓", color = pal.bg, fontSize = 11.sp)
             }
-            Spacer(Modifier.width(10.dp))
-            Text("Auto candidate mode", color = pal2.txtDim, fontSize = 14.sp)
+            Spacer(Modifier.width(6.dp))
+            Text("Auto", color = pal.txtDim, fontSize = 13.sp)
         }
     }
 
@@ -236,7 +231,7 @@ class GameScreen(
     private fun NumKey(d: Int, dim: Boolean, modifier: Modifier) {
         val pal = LocalSudokuPalette.current
         Box(
-            modifier.height(52.dp).clip(RoundedCornerShape(10.dp))
+            modifier.height(50.dp).clip(RoundedCornerShape(10.dp))
                 .background(pal.btn).clickable { viewModel.input(d) },
             contentAlignment = Alignment.Center,
         ) {

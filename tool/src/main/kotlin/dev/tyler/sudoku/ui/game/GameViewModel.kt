@@ -41,7 +41,10 @@ sealed interface GameResult {
     data object OpenArchive : GameResult
 }
 
-data class UndoFrame(val i: Int, val value: Int, val cand: Int, val err: Boolean, val locked: Boolean)
+data class UndoFrame(
+    val i: Int, val value: Int, val cand: Int, val err: Boolean, val locked: Boolean,
+    val autoAdded: Int, val autoRemoved: Int,
+)
 
 data class GameUiState(
     val dateKey: String = "",
@@ -50,7 +53,10 @@ data class GameUiState(
     val values: IntArray = IntArray(81),
     val givenMask: BooleanArray = BooleanArray(81),
     val lockedMask: BooleanArray = BooleanArray(81),
-    val candidates: IntArray = IntArray(81),   // pencil bitmasks (manual mode)
+    val candidates: IntArray = IntArray(81),   // pencil bitmasks (auto-OFF manual layer)
+    // auto-ON layer: user's manual diffs over the live auto-candidate set
+    val autoAdded: IntArray = IntArray(81),    // bits the user turned on while auto was on
+    val autoRemoved: IntArray = IntArray(81),  // bits the user turned off while auto was on
     val checkErr: BooleanArray = BooleanArray(81),
     val selected: Int = -1,
     val mode: InputMode = InputMode.NORMAL,
@@ -98,6 +104,8 @@ class GameViewModel(
         clueLayout = p.puzzle.copyOf()
         val values = p.puzzle.copyOf()
         var cand = IntArray(81)
+        var autoAdd = IntArray(81)
+        var autoRem = IntArray(81)
         var locked = BooleanArray(81)
         var auto = settings.autoStart
         var solved = false
@@ -107,6 +115,8 @@ class GameViewModel(
         Codecs.decodeProgress(store.get(StoreKeys.progress(dateKey, difficulty)))?.let { o ->
             for (i in 0 until 81) if (!given[i]) values[i] = o.v.getOrElse(i) { 0 }
             cand = IntArray(81) { o.c.getOrElse(it) { 0 } }
+            autoAdd = IntArray(81) { o.ca.getOrElse(it) { 0 } }
+            autoRem = IntArray(81) { o.cr.getOrElse(it) { 0 } }
             locked = BooleanArray(81) { o.l.getOrElse(it) { 0 } == 1 }
             auto = o.a == 1; solved = o.s == 1; usedReveal = o.r == 1; elapsed = o.t
         }
@@ -115,7 +125,8 @@ class GameViewModel(
         startTs = 0L
         _ui.value = s.copy(
             generating = false, solution = p.solution, values = values, givenMask = given,
-            lockedMask = locked, candidates = cand, checkErr = BooleanArray(81),
+            lockedMask = locked, candidates = cand, autoAdded = autoAdd, autoRemoved = autoRem,
+            checkErr = BooleanArray(81),
             selected = -1, mode = InputMode.NORMAL, autoCandidate = auto,
             undo = emptyList(), solved = solved, usedReveal = usedReveal,
             elapsedSec = elapsed, running = false, settings = settings,
@@ -246,6 +257,7 @@ class GameViewModel(
             l = s.lockedMask.map { if (it) 1 else 0 },
             a = if (s.autoCandidate) 1 else 0, t = elapsedSec(),
             s = if (s.solved) 1 else 0, r = if (s.usedReveal) 1 else 0,
+            ca = s.autoAdded.toList(), cr = s.autoRemoved.toList(),
         )
         viewModelScope.launch {
             withContext(NonCancellable) {
@@ -279,7 +291,9 @@ class GameViewModel(
     private fun isStarted(): Boolean {
         for (i in 0 until 81) {
             if (s.givenMask[i]) continue
-            if (s.values[i] != 0 || s.candidates[i] != 0 || s.lockedMask[i]) return true
+            if (s.values[i] != 0 || s.candidates[i] != 0 || s.lockedMask[i] ||
+                s.autoAdded[i] != 0 || s.autoRemoved[i] != 0
+            ) return true
         }
         return false
     }
@@ -287,40 +301,84 @@ class GameViewModel(
     // ---------- selection / input ----------
     fun select(i: Int) { _ui.value = s.copy(selected = i, elapsedSec = elapsedSec()) }
 
-    fun setMode(m: InputMode) { if (!s.autoCandidate) _ui.value = s.copy(mode = m) }
+    // The switcher and keypad stay live in both modes; auto candidate mode only changes
+    // which candidate layer the pencil marks come from (see pencilMask).
+    fun setMode(m: InputMode) { _ui.value = s.copy(mode = m) }
 
     fun toggleAutoCandidate() {
-        val on = !s.autoCandidate
-        _ui.value = s.copy(autoCandidate = on, mode = if (on) InputMode.NORMAL else s.mode)
+        _ui.value = s.copy(autoCandidate = !s.autoCandidate)
         persistProgressSoon()
+    }
+
+    /** Bitmask of the live, valid auto-candidates for a cell (no user diffs applied). */
+    private fun autoSetMask(i: Int): Int {
+        var m = 0
+        for (d in SudokuEngine.autoCandidates(s.values, i)) m = m or (1 shl (d - 1))
+        return m
+    }
+
+    /**
+     * Pencil bitmask shown for an empty cell, per the active candidate layer:
+     *  - auto OFF -> the user's manual marks ([candidates]);
+     *  - auto ON  -> the live valid-candidate set, plus the user's [autoAdded], minus [autoRemoved].
+     * The two layers are independent and neither bleeds into the other.
+     */
+    fun pencilMask(i: Int): Int {
+        if (!s.autoCandidate) return s.candidates[i]
+        return (autoSetMask(i) or s.autoAdded[i]) and s.autoRemoved[i].inv()
     }
 
     private fun canEdit(i: Int) = i in 0..80 && !s.givenMask[i] && !s.lockedMask[i] && !s.solved
 
     private fun pushUndo(i: Int): List<UndoFrame> =
-        (s.undo + UndoFrame(i, s.values[i], s.candidates[i], s.checkErr[i], s.lockedMask[i])).takeLast(400)
+        (s.undo + UndoFrame(
+            i, s.values[i], s.candidates[i], s.checkErr[i], s.lockedMask[i],
+            s.autoAdded[i], s.autoRemoved[i],
+        )).takeLast(400)
 
     fun input(d: Int) {
         val i = s.selected
         if (i < 0 || s.solved) return
-        if (s.mode == InputMode.CANDIDATE && !s.autoCandidate) {
+        if (s.mode == InputMode.CANDIDATE) {
             if (!canEdit(i) || s.values[i] != 0) return
-            val cand = s.candidates.copyOf()
-            cand[i] = cand[i] xor (1 shl (d - 1))
-            _ui.value = s.copy(candidates = cand, undo = pushUndo(i))
+            val bit = 1 shl (d - 1)
+            if (s.autoCandidate) {
+                // Toggle the *displayed* candidate by recording a diff over the live auto set.
+                // Keep the diffs minimal: only pin genuine additions (bits not in the auto set)
+                // and only record removals of genuine auto candidates. This way a natural
+                // candidate toggled off then on isn't "pinned" and still tracks the live set.
+                val autoSet = autoSetMask(i)
+                val added = s.autoAdded.copyOf(); val removed = s.autoRemoved.copyOf()
+                if (pencilMask(i) and bit != 0) {          // shown -> hide it
+                    added[i] = added[i] and bit.inv()
+                    if (autoSet and bit != 0) removed[i] = removed[i] or bit
+                } else {                                    // hidden -> show it
+                    removed[i] = removed[i] and bit.inv()
+                    if (autoSet and bit == 0) added[i] = added[i] or bit
+                }
+                _ui.value = s.copy(autoAdded = added, autoRemoved = removed, undo = pushUndo(i))
+            } else {
+                val cand = s.candidates.copyOf()
+                cand[i] = cand[i] xor bit
+                _ui.value = s.copy(candidates = cand, undo = pushUndo(i))
+            }
             persistProgressSoon()
             return
         }
         if (!canEdit(i)) return
         val undo = pushUndo(i)
         val values = s.values.copyOf(); val cand = s.candidates.copyOf(); val err = s.checkErr.copyOf()
-        values[i] = d; cand[i] = 0; err[i] = false
+        val added = s.autoAdded.copyOf(); val removed = s.autoRemoved.copyOf()
+        values[i] = d; cand[i] = 0; err[i] = false; added[i] = 0; removed[i] = 0
         if (s.settings.checkOnEntry && !s.settings.plain) err[i] = d != s.solution[i]
         // courtesy: clear this digit from peers' manual pencil marks
         for (j in peersOf(i)) if (values[j] == 0 && (cand[j] and (1 shl (d - 1))) != 0) {
             cand[j] = cand[j] and (1 shl (d - 1)).inv()
         }
-        _ui.value = s.copy(values = values, candidates = cand, checkErr = err, undo = undo)
+        _ui.value = s.copy(
+            values = values, candidates = cand, checkErr = err,
+            autoAdded = added, autoRemoved = removed, undo = undo,
+        )
         persistProgressSoon()
         checkWin()
     }
@@ -328,11 +386,15 @@ class GameViewModel(
     fun erase() {
         val i = s.selected
         if (!canEdit(i)) return
-        if (s.values[i] == 0 && s.candidates[i] == 0) return
+        if (s.values[i] == 0 && s.candidates[i] == 0 && s.autoAdded[i] == 0 && s.autoRemoved[i] == 0) return
         val undo = pushUndo(i)
         val values = s.values.copyOf(); val cand = s.candidates.copyOf(); val err = s.checkErr.copyOf()
-        values[i] = 0; cand[i] = 0; err[i] = false
-        _ui.value = s.copy(values = values, candidates = cand, checkErr = err, undo = undo)
+        val added = s.autoAdded.copyOf(); val removed = s.autoRemoved.copyOf()
+        values[i] = 0; cand[i] = 0; err[i] = false; added[i] = 0; removed[i] = 0
+        _ui.value = s.copy(
+            values = values, candidates = cand, checkErr = err,
+            autoAdded = added, autoRemoved = removed, undo = undo,
+        )
         persistProgressSoon()
     }
 
@@ -341,9 +403,12 @@ class GameViewModel(
         val u = s.undo.last()
         val values = s.values.copyOf(); val cand = s.candidates.copyOf()
         val err = s.checkErr.copyOf(); val locked = s.lockedMask.copyOf()
+        val added = s.autoAdded.copyOf(); val removed = s.autoRemoved.copyOf()
         values[u.i] = u.value; cand[u.i] = u.cand; err[u.i] = u.err; locked[u.i] = u.locked
+        added[u.i] = u.autoAdded; removed[u.i] = u.autoRemoved
         _ui.value = s.copy(
             values = values, candidates = cand, checkErr = err, lockedMask = locked,
+            autoAdded = added, autoRemoved = removed,
             selected = u.i, undo = s.undo.dropLast(1),
         )
         persistProgressSoon()
@@ -381,10 +446,12 @@ class GameViewModel(
         val undo = pushUndo(i)
         val values = s.values.copyOf(); val cand = s.candidates.copyOf()
         val err = s.checkErr.copyOf(); val locked = s.lockedMask.copyOf()
+        val added = s.autoAdded.copyOf(); val removed = s.autoRemoved.copyOf()
         values[i] = digit; cand[i] = 0; err[i] = false; locked[i] = true
+        added[i] = 0; removed[i] = 0
         _ui.value = s.copy(
             values = values, candidates = cand, checkErr = err, lockedMask = locked,
-            selected = i, undo = undo,
+            autoAdded = added, autoRemoved = removed, selected = i, undo = undo,
         )
         persistProgressSoon()
         checkWin()
@@ -434,9 +501,12 @@ class GameViewModel(
         val undo = pushUndo(i)
         val values = s.values.copyOf(); val cand = s.candidates.copyOf()
         val err = s.checkErr.copyOf(); val locked = s.lockedMask.copyOf()
+        val added = s.autoAdded.copyOf(); val removed = s.autoRemoved.copyOf()
         values[i] = s.solution[i]; cand[i] = 0; err[i] = false; locked[i] = true
+        added[i] = 0; removed[i] = 0
         _ui.value = s.copy(
-            values = values, candidates = cand, checkErr = err, lockedMask = locked, undo = undo,
+            values = values, candidates = cand, checkErr = err, lockedMask = locked,
+            autoAdded = added, autoRemoved = removed, undo = undo,
         )
         persistProgressSoon()
         checkWin()
@@ -447,7 +517,8 @@ class GameViewModel(
         for (i in 0 until 81) if (!s.givenMask[i]) { values[i] = s.solution[i]; locked[i] = true }
         stopTimer()
         _ui.value = s.copy(
-            values = values, candidates = IntArray(81), lockedMask = locked,
+            values = values, candidates = IntArray(81),
+            autoAdded = IntArray(81), autoRemoved = IntArray(81), lockedMask = locked,
             checkErr = BooleanArray(81), usedReveal = true, solved = true,
             undo = emptyList(), selected = -1, overlay = null,
         )
@@ -459,6 +530,7 @@ class GameViewModel(
         baseMs = 0; startTs = 0
         _ui.value = s.copy(
             values = clueLayout.copyOf(), candidates = IntArray(81),
+            autoAdded = IntArray(81), autoRemoved = IntArray(81),
             lockedMask = BooleanArray(81), checkErr = BooleanArray(81), undo = emptyList(),
             solved = false, usedReveal = false, selected = -1, elapsedSec = 0,
             running = false, overlay = null,

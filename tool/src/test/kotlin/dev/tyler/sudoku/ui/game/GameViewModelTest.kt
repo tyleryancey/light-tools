@@ -292,4 +292,154 @@ class GameViewModelTest {
         assertEquals(null, vm.ui.value.overlay)
         assertFalse(vm.onBackPressed(), "no overlay: back pops the screen")
     }
+
+    // ---------- auto candidate mode: two independent candidate layers ----------
+
+    private fun firstEmpty(vm: GameViewModel): Int =
+        (0 until 81).first { !vm.ui.value.givenMask[it] && vm.ui.value.values[it] == 0 }
+
+    private fun autoMask(vm: GameViewModel, i: Int): Int {
+        var m = 0
+        for (d in SudokuEngine.autoCandidates(vm.ui.value.values, i)) m = m or (1 shl (d - 1))
+        return m
+    }
+
+    @Test fun modeSwitchStaysLiveWhenAutoCandidateOn() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.toggleAutoCandidate()
+        assertTrue(vm.ui.value.autoCandidate)
+        vm.setMode(InputMode.CANDIDATE)
+        assertEquals(InputMode.CANDIDATE, vm.ui.value.mode, "switcher works with auto on")
+    }
+
+    @Test fun togglingAutoCandidateKeepsCurrentMode() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.setMode(InputMode.CANDIDATE)
+        vm.toggleAutoCandidate()
+        assertEquals(InputMode.CANDIDATE, vm.ui.value.mode, "toggling auto never forces NORMAL")
+    }
+
+    @Test fun autoCandidateModeRevealsAllValidCandidates() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.toggleAutoCandidate()
+        val expected = autoMask(vm, i)
+        assertTrue(expected != 0, "an empty cell has valid candidates")
+        assertEquals(expected, vm.pencilMask(i), "auto on reveals the full valid candidate set")
+    }
+
+    @Test fun candidateEditWhileAutoOnUsesAutoLayerNotManual() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.toggleAutoCandidate()
+        val shown = vm.pencilMask(i)
+        val d = (1..9).first { shown and (1 shl (it - 1)) != 0 }
+        vm.setMode(InputMode.CANDIDATE); vm.select(i); vm.input(d); advanceUntilIdle()
+        assertEquals(0, vm.pencilMask(i) and (1 shl (d - 1)), "deleting an auto candidate hides it")
+        assertTrue(vm.ui.value.autoRemoved[i] and (1 shl (d - 1)) != 0, "diff recorded in auto layer")
+        assertEquals(0, vm.ui.value.candidates[i], "manual (auto-off) layer left untouched")
+    }
+
+    @Test fun manualAndAutoCandidateLayersDoNotBleed() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        // auto OFF: place a manual pencil mark
+        vm.setMode(InputMode.CANDIDATE); vm.select(i); vm.input(7); advanceUntilIdle()
+        assertEquals(1 shl 6, vm.pencilMask(i), "auto off shows only manual marks")
+        // auto ON: manual mark hidden, full auto set shown instead
+        vm.toggleAutoCandidate()
+        assertEquals(autoMask(vm, i), vm.pencilMask(i), "auto on shows the auto set, not manual marks")
+        // auto OFF again: manual mark returns intact
+        vm.toggleAutoCandidate()
+        assertEquals(1 shl 6, vm.pencilMask(i), "manual mark preserved across toggles")
+    }
+
+    @Test fun undoRestoresAutoCandidateLayerEdit() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.toggleAutoCandidate()
+        val before = vm.pencilMask(i)
+        val d = (1..9).first { before and (1 shl (it - 1)) != 0 }
+        vm.setMode(InputMode.CANDIDATE); vm.select(i); vm.input(d); advanceUntilIdle()
+        assertTrue(vm.pencilMask(i) != before, "edit changed the shown mask")
+        vm.undo(); advanceUntilIdle()
+        assertEquals(before, vm.pencilMask(i), "undo restores the auto-layer edit")
+    }
+
+    @Test fun autoCandidateLayerPersistsAcrossReopen() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.toggleAutoCandidate()
+        val shown = vm.pencilMask(i)
+        val d = (1..9).first { shown and (1 shl (it - 1)) != 0 }
+        vm.setMode(InputMode.CANDIDATE); vm.select(i); vm.input(d)
+        vm.persistProgress(); advanceUntilIdle()
+        val removed = vm.ui.value.autoRemoved[i]
+        assertTrue(removed != 0)
+        val vm2 = vm(); advanceUntilIdle()
+        assertTrue(vm2.ui.value.autoCandidate, "auto flag restored")
+        assertEquals(removed, vm2.ui.value.autoRemoved[i], "auto-layer diff restored from storage")
+    }
+
+    @Test fun reshownNaturalCandidateStillTracksLiveAutoSet() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.toggleAutoCandidate()
+        val d = (1..9).first { autoMask(vm, i) and (1 shl (it - 1)) != 0 }
+        // toggle a natural candidate off then on again — it must not get "pinned"
+        vm.setMode(InputMode.CANDIDATE); vm.select(i)
+        vm.input(d); advanceUntilIdle()   // hide d
+        vm.input(d); advanceUntilIdle()   // show d again
+        assertTrue(vm.pencilMask(i) and (1 shl (d - 1)) != 0, "d is visible again")
+        // make d invalid for cell i by placing it in one of i's peers
+        val r = i / 9; val c = i % 9; val b = SudokuEngine.boxOf(i)
+        val peer = (0 until 81).first { j ->
+            j != i && (j / 9 == r || j % 9 == c || SudokuEngine.boxOf(j) == b) &&
+                !vm.ui.value.givenMask[j] && vm.ui.value.values[j] == 0
+        }
+        vm.setMode(InputMode.NORMAL); vm.select(peer); vm.input(d); advanceUntilIdle()
+        assertEquals(
+            0, vm.pencilMask(i) and (1 shl (d - 1)),
+            "a re-shown natural candidate must still disappear once it becomes invalid",
+        )
+    }
+
+    @Test fun addingPeerBlockedCandidateWhileAutoOnPinsThenClears() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.toggleAutoCandidate()
+        // find an empty cell + a digit that is NOT a valid auto candidate (blocked by a peer)
+        val (i, d) = run {
+            for (cell in 0 until 81) {
+                if (vm.ui.value.givenMask[cell] || vm.ui.value.values[cell] != 0) continue
+                val mask = autoMask(vm, cell)
+                for (dd in 1..9) if (mask and (1 shl (dd - 1)) == 0) return@run cell to dd
+            }
+            error("expected an empty cell with a peer-blocked digit")
+        }
+        val bit = 1 shl (d - 1)
+        vm.setMode(InputMode.CANDIDATE); vm.select(i)
+        vm.input(d); advanceUntilIdle()
+        assertTrue(vm.ui.value.autoAdded[i] and bit != 0, "a non-auto digit is recorded as an addition")
+        assertTrue(vm.pencilMask(i) and bit != 0, "and is shown via the (autoSet or autoAdded) term")
+        // toggling it back off clears the addition and does NOT record a phantom removal
+        vm.input(d); advanceUntilIdle()
+        assertEquals(0, vm.ui.value.autoAdded[i] and bit, "addition cleared")
+        assertEquals(0, vm.ui.value.autoRemoved[i] and bit, "never recorded as a removal (was not in the auto set)")
+        assertEquals(0, vm.pencilMask(i) and bit, "and no longer shown")
+    }
+
+    @Test fun placingValueClearsBothCandidateLayers() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        // seed a manual mark (auto off), then an auto-layer diff (auto on)
+        vm.setMode(InputMode.CANDIDATE); vm.select(i); vm.input(7); advanceUntilIdle()
+        vm.toggleAutoCandidate()
+        val d = (1..9).first { vm.pencilMask(i) and (1 shl (it - 1)) != 0 }
+        vm.input(d); advanceUntilIdle()
+        // now place a value in NORMAL mode
+        vm.setMode(InputMode.NORMAL); vm.input(vm.ui.value.solution[i]); advanceUntilIdle()
+        assertEquals(0, vm.ui.value.candidates[i], "manual layer cleared on value entry")
+        assertEquals(0, vm.ui.value.autoAdded[i], "auto-added diff cleared on value entry")
+        assertEquals(0, vm.ui.value.autoRemoved[i], "auto-removed diff cleared on value entry")
+    }
 }

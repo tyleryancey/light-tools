@@ -31,6 +31,23 @@ class CodecsTest {
         assertNull(Codecs.decodeProgress(null))
     }
 
+    @Test fun progressRoundTripCarriesAutoCandidateLayers() {
+        val p = ProgressDto(
+            v = List(81) { 0 }, c = List(81) { it % 4 }, l = List(81) { 0 },
+            a = 1, t = 5, s = 0, r = 0,
+            ca = List(81) { it % 3 }, cr = List(81) { it % 2 },
+        )
+        assertEquals(p, Codecs.decodeProgress(Codecs.encodeProgress(p)))
+    }
+
+    @Test fun oldProgressWithoutAutoLayersDecodesWithEmptyLayers() {
+        val arr = (0 until 81).joinToString(",") { "0" }
+        val legacy = """{"v":[$arr],"c":[$arr],"l":[$arr],"a":0,"t":10,"s":0,"r":0}"""
+        val decoded = Codecs.decodeProgress(legacy)!!
+        assertEquals(10, decoded.t, "legacy fields still decode")
+        assertTrue(decoded.ca.isEmpty() && decoded.cr.isEmpty(), "missing auto layers default to empty")
+    }
+
     @Test fun puzzleRoundTrip() {
         val p = SudokuEngine.generatePuzzle("2026-06-16", "easy")
         val q = Codecs.decodePuzzle(Codecs.encodePuzzle(p))!!

@@ -27,11 +27,16 @@ internal data class SettingsDto(
     val sound: Boolean = false, val plain: Boolean = false,
 )
 
-/** Per-puzzle progress; field names v/c/l/a/t/s/r carry over from the prototype. */
+/**
+ * Per-puzzle progress; field names v/c/l/a/t/s/r carry over from the prototype.
+ * ca/cr are the auto-candidate diff layers (added/removed bits over the live auto set);
+ * they default to empty so progress saved before this feature still decodes.
+ */
 @Serializable
 data class ProgressDto(
     val v: List<Int>, val c: List<Int>, val l: List<Int>,
     val a: Int, val t: Int, val s: Int, val r: Int,
+    val ca: List<Int> = emptyList(), val cr: List<Int> = emptyList(),
 )
 
 @Serializable

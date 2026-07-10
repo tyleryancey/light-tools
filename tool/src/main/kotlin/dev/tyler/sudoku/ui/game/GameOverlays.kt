@@ -94,11 +94,11 @@ private fun CenterSheet(vm: GameViewModel, scrollable: Boolean = false, content:
         contentAlignment = Alignment.Center,
     ) {
         Column(
-            Modifier.widthIn(max = 340.dp).fillMaxWidth().padding(24.dp)
+            Modifier.widthIn(max = 340.dp).fillMaxWidth().padding(16.dp)
                 .clip(RoundedCornerShape(16.dp)).background(pal.btn)
                 .clickable(enabled = false) {}
                 .let { if (scrollable) it.verticalScroll(rememberScrollState()) else it }
-                .padding(20.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
         ) { content() }
     }
 }
@@ -107,7 +107,7 @@ private fun CenterSheet(vm: GameViewModel, scrollable: Boolean = false, content:
 private fun SheetLabel(text: String) {
     val pal = LocalSudokuPalette.current
     Text(text.uppercase(), color = pal.txtDim, fontSize = 11.sp, letterSpacing = 2.sp,
-        modifier = Modifier.padding(bottom = 8.dp))
+        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
 }
 
 @Composable
@@ -165,7 +165,7 @@ private fun ToggleRow(label: String, caption: String? = null, on: Boolean, onTog
     val pal = LocalSudokuPalette.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClick = onToggle)
-            .padding(vertical = 9.dp),
+            .padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -189,12 +189,13 @@ private fun ToggleRow(label: String, caption: String? = null, on: Boolean, onTog
 private fun SettingsSheet(vm: GameViewModel, st: Settings) {
     val pal = LocalSudokuPalette.current
     Text("Settings", color = pal.txt, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(bottom = 10.dp))
+        modifier = Modifier.padding(bottom = 6.dp))
+    // Labels drop the redundant "Highlight" prefix — the section header already says it.
     SheetLabel("Highlighting")
-    ToggleRow("Highlight row and column", on = st.rowcol) { vm.toggleSetting("rowcol") }
-    ToggleRow("Highlight box", on = st.box) { vm.toggleSetting("box") }
-    ToggleRow("Highlight identical numbers", on = st.same) { vm.toggleSetting("same") }
-    ToggleRow("Highlight conflicts", on = st.conflicts) { vm.toggleSetting("conflicts") }
+    ToggleRow("Row and column", on = st.rowcol) { vm.toggleSetting("rowcol") }
+    ToggleRow("Box", on = st.box) { vm.toggleSetting("box") }
+    ToggleRow("Identical numbers", on = st.same) { vm.toggleSetting("same") }
+    ToggleRow("Conflicts", on = st.conflicts) { vm.toggleSetting("conflicts") }
     SheetLabel("Assistance")
     ToggleRow("Check guesses when entered", on = st.checkOnEntry) { vm.toggleSetting("checkOnEntry") }
     ToggleRow("Start in auto candidate mode", on = st.autoStart) { vm.toggleSetting("autoStart") }
@@ -205,7 +206,7 @@ private fun SettingsSheet(vm: GameViewModel, st: Settings) {
     ToggleRow("Plain mode", "Hide every highlight and check for a bare grid", st.plain) {
         vm.toggleSetting("plain")
     }
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(8.dp))
     SolidButton("Done") { vm.dismissOverlay() }
 }
 
