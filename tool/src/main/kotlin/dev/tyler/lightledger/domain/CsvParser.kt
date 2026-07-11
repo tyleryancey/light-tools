@@ -23,7 +23,7 @@ object CsvParser {
     }
 
     private fun stripBom(text: String): String =
-        if (text.isNotEmpty() && text[0] == '﻿') text.substring(1) else text
+        if (text.isNotEmpty() && text[0] == '\uFEFF') text.substring(1) else text
 
     private fun splitLines(text: String): List<String> =
         text.split("\r\n", "\n").map { it.removeSuffix("\r") }
