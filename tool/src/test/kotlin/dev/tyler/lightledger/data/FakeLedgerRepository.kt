@@ -11,6 +11,7 @@ class FakeLedgerRepository : LedgerRepository {
     private val transactions = mutableListOf<Transaction>()
     private val categoryIds = AtomicLong(1)
     private val transactionIds = AtomicLong(1)
+    private val archivedCategoryIds = mutableSetOf<Long>()
 
     var seeded = false
         private set
@@ -22,7 +23,8 @@ class FakeLedgerRepository : LedgerRepository {
             .forEach { addCategory(it) }
     }
 
-    override suspend fun listCategories(): List<Category> = categories.toList()
+    override suspend fun listCategories(): List<Category> =
+        categories.filterNot { it.id in archivedCategoryIds }
 
     override suspend fun addCategory(name: String): Category {
         val category = Category(id = categoryIds.getAndIncrement(), name = name, sortOrder = categories.size)
@@ -36,7 +38,7 @@ class FakeLedgerRepository : LedgerRepository {
     }
 
     override suspend fun archiveCategory(id: Long) {
-        categories.removeAll { it.id == id }
+        archivedCategoryIds.add(id)
     }
 
     override suspend fun addManualTransaction(

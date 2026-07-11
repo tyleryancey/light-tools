@@ -12,6 +12,9 @@ internal interface CategoryDao {
     @Query("SELECT * FROM categories WHERE archived = 0 ORDER BY sortOrder")
     fun listActive(): List<CategoryEntity>
 
+    @Query("SELECT * FROM categories")
+    fun listAll(): List<CategoryEntity>
+
     @Query("SELECT COUNT(*) FROM categories")
     fun count(): Int
 

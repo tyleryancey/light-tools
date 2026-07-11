@@ -70,6 +70,18 @@ class LedgerRepositoryContractTest {
         assertTrue(repo.listCategories().none { it.id == category.id })
     }
 
+    @Test fun archivingCategoryRetainsItsSpendInMonthSummary() = runTest {
+        val repo = FakeLedgerRepository()
+        repo.ensureSeeded()
+        val category = repo.listCategories().first()
+        repo.addManualTransaction(amountMinor = -450L, payee = "Coffee", categoryId = category.id)
+        repo.archiveCategory(category.id)
+
+        val summary = repo.monthSummary(YearMonth.now())
+        assertEquals(-450L, summary.sumOf { it.totalMinor })
+        assertTrue(repo.listCategories().none { it.id == category.id })
+    }
+
     @Test fun needsReviewCountIsZeroForManualOnlyData() = runTest {
         val repo = FakeLedgerRepository()
         repo.ensureSeeded()

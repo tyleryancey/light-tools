@@ -79,7 +79,7 @@ class RoomLedgerRepository private constructor(
     override suspend fun monthSummary(month: YearMonth): List<CategoryMonthTotal> = withContext(Dispatchers.IO) {
         val range = LedgerMath.epochDayRange(month)
         val transactions = transactionDao.listConfirmedInRange(range.first, range.last)
-        val categoriesById = categoryDao.listActive().associateBy { it.id }
+        val categoriesById = categoryDao.listAll().associateBy { it.id }
         LedgerMath.categoryTotals(
             transactions.mapNotNull { txn ->
                 val categoryId = txn.categoryId ?: return@mapNotNull null
