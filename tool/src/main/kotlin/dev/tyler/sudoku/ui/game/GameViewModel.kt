@@ -330,6 +330,31 @@ class GameViewModel(
 
     private fun canEdit(i: Int) = i in 0..80 && !s.givenMask[i] && !s.lockedMask[i] && !s.solved
 
+    // ---------- minimizable keyboard: keypad visibility is derived, not stored ----------
+
+    /** Clear the selection; in the derived-visibility model this collapses the keypad (big board). */
+    fun deselect() { _ui.value = s.copy(selected = -1) }
+
+    /**
+     * Open the keypad by selecting a cell to edit: the first empty editable cell, or — if the board
+     * is full but unsolved (a wrong entry somewhere) — the first editable cell so a mistake can still
+     * be fixed. No-op only when nothing is editable (e.g. solved), leaving the board maximized.
+     */
+    fun summonKeypad() {
+        val i = (0 until 81).firstOrNull { s.values[it] == 0 && canEdit(it) }
+            ?: (0 until 81).firstOrNull { canEdit(it) }
+            ?: return
+        select(i)
+    }
+
+    /**
+     * The keypad (the whole controls block) shows exactly when an editable cell is selected and the
+     * puzzle isn't solved. Visibility is derived from [GameUiState.selected] — no stored flag — so the
+     * board is large whenever the player isn't entering a number, and every launch opens keypad-less
+     * (selected resets to -1 in [open]).
+     */
+    fun shouldShowKeypad(): Boolean = canEdit(s.selected)
+
     private fun pushUndo(i: Int): List<UndoFrame> =
         (s.undo + UndoFrame(
             i, s.values[i], s.candidates[i], s.checkErr[i], s.lockedMask[i],

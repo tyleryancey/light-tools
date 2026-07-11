@@ -442,4 +442,125 @@ class GameViewModelTest {
         assertEquals(0, vm.ui.value.autoAdded[i], "auto-added diff cleared on value entry")
         assertEquals(0, vm.ui.value.autoRemoved[i], "auto-removed diff cleared on value entry")
     }
+
+    // ---------- minimizable keyboard: keypad visibility derived from selection ----------
+
+    @Test fun keypadHiddenWhenNothingSelected() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        assertEquals(-1, vm.ui.value.selected, "fresh open selects nothing")
+        assertFalse(vm.shouldShowKeypad(), "no selection -> keypad hidden, board is big")
+    }
+
+    @Test fun keypadShownWhenEditableEmptyCellSelected() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.select(firstEmpty(vm))
+        assertTrue(vm.shouldShowKeypad(), "selecting an editable empty cell shows the keypad")
+    }
+
+    @Test fun keypadShownForEditableFilledCell() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.select(i); vm.input(vm.ui.value.solution[i]); advanceUntilIdle()
+        assertFalse(vm.ui.value.solved, "filling one cell of an easy board does not solve it")
+        assertTrue(vm.shouldShowKeypad(), "an editable, user-filled cell still shows the keypad (to change/erase)")
+    }
+
+    @Test fun keypadHiddenForGivenCell() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.select((0 until 81).first { vm.ui.value.givenMask[it] })
+        assertFalse(vm.shouldShowKeypad(), "selecting a clue cell keeps the keypad hidden")
+    }
+
+    @Test fun keypadHiddenForLockedCell() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.fillHint(); advanceUntilIdle()
+        vm.select((0 until 81).first { vm.ui.value.lockedMask[it] })
+        assertFalse(vm.shouldShowKeypad(), "a locked (hinted/revealed) cell keeps the keypad hidden")
+    }
+
+    @Test fun keypadHiddenWhenSolved() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        for (i in 0 until 81) if (!ui.givenMask[i]) { vm.select(i); vm.input(ui.solution[i]) }
+        advanceUntilIdle()
+        assertTrue(vm.ui.value.solved)
+        assertFalse(vm.shouldShowKeypad(), "a solved puzzle hides the keypad, showing the finished board")
+    }
+
+    @Test fun deselectHidesKeypad() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.select(firstEmpty(vm))
+        assertTrue(vm.shouldShowKeypad())
+        vm.deselect()
+        assertEquals(-1, vm.ui.value.selected)
+        assertFalse(vm.shouldShowKeypad(), "deselect collapses the keypad")
+    }
+
+    @Test fun summonKeypadSelectsFirstEmptyEditableCell() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        assertEquals(-1, vm.ui.value.selected)
+        vm.summonKeypad()
+        val expected = (0 until 81).first { !vm.ui.value.givenMask[it] && vm.ui.value.values[it] == 0 }
+        assertEquals(expected, vm.ui.value.selected, "summon jumps to the first empty editable cell")
+        assertTrue(vm.shouldShowKeypad())
+    }
+
+    @Test fun summonKeypadNoOpWhenSolved() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        for (i in 0 until 81) if (!ui.givenMask[i]) { vm.select(i); vm.input(ui.solution[i]) }
+        advanceUntilIdle()
+        assertTrue(vm.ui.value.solved)
+        vm.deselect()
+        vm.summonKeypad()
+        assertEquals(-1, vm.ui.value.selected, "solved puzzle has nothing to edit -> summon is a no-op")
+    }
+
+    @Test fun summonKeypadFallsBackToEditableCellWhenBoardFullButUnsolved() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val ui = vm.ui.value
+        val editable = (0 until 81).filter { !ui.givenMask[it] }
+        // fill every editable cell correctly except the last, which we make wrong -> full but unsolved
+        for (i in editable) {
+            vm.select(i)
+            val v = if (i == editable.last()) (if (ui.solution[i] == 1) 2 else 1) else ui.solution[i]
+            vm.input(v)
+        }
+        advanceUntilIdle()
+        assertFalse(vm.ui.value.solved, "one wrong entry -> not solved")
+        assertTrue(vm.ui.value.values.all { it != 0 }, "board is completely full")
+        vm.deselect()
+        assertFalse(vm.shouldShowKeypad())
+        // the '▴ Keypad' handle must still open the keypad so the mistake can be fixed
+        vm.summonKeypad()
+        assertTrue(vm.shouldShowKeypad(), "summon opens the keypad even with no empty cell left")
+        val sel = vm.ui.value.selected
+        assertTrue(sel in 0..80 && !vm.ui.value.givenMask[sel], "summon landed on an editable cell")
+    }
+
+    @Test fun undoOfEditableCellReopensKeypad() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        val i = firstEmpty(vm)
+        vm.select(i); vm.input(5); advanceUntilIdle()
+        vm.deselect()
+        assertFalse(vm.shouldShowKeypad())
+        vm.undo(); advanceUntilIdle()
+        assertEquals(i, vm.ui.value.selected, "undo re-selects the affected cell")
+        assertTrue(vm.shouldShowKeypad(), "undo of an editable cell reopens the keypad")
+    }
+
+    @Test fun pointHintOpensKeypadOnSuggestedCell() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.pointHint(); advanceUntilIdle()
+        assertTrue(vm.ui.value.selected >= 0, "point hint selects a square")
+        assertTrue(vm.shouldShowKeypad(), "point hint opens the keypad on the square to fill")
+    }
+
+    @Test fun fillHintCollapsesKeypad() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        vm.fillHint(); advanceUntilIdle()
+        val filled = (0 until 81).first { vm.ui.value.lockedMask[it] }
+        assertEquals(filled, vm.ui.value.selected, "fill hint leaves the filled cell selected")
+        assertFalse(vm.shouldShowKeypad(), "fill hint locks the cell -> keypad collapses to the big board")
+    }
 }

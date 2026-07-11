@@ -79,7 +79,9 @@ class GameScreen(
                     val boardSize = minOf(maxWidth, maxHeight)
                     Board(viewModel, ui, boardSize, Modifier.size(boardSize))
                 }
-                Controls(ui)
+                // Minimizable keyboard: the controls show only while an editable cell is
+                // selected; otherwise they collapse to a slim handle so the board grows.
+                if (viewModel.shouldShowKeypad()) Controls(ui) else KeypadHandle()
                 Spacer(Modifier.height(8.dp))
             }
 
@@ -165,6 +167,8 @@ class GameScreen(
                     .clickable(enabled = undoEnabled) { viewModel.undo() }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             )
+            // Minimize the keypad (deselect) to hand the freed space back to the board.
+            IconGlyph("▾", "Hide keypad") { viewModel.deselect() }
         }
 
         // numpad 1..9 + erase; dim digits placed 9 times. Keys stay full-width & >=48dp tall.
@@ -186,6 +190,22 @@ class GameScreen(
                     .background(pal.btn).clickable { viewModel.erase() },
                 contentAlignment = Alignment.Center,
             ) { Text("✕", color = pal.txt, fontSize = 18.sp) }
+        }
+    }
+
+    // Collapsed state of the minimizable keyboard: a slim, tappable bar that replaces the whole
+    // control block so the board grows to near full width. Tapping it summons the keypad by
+    // selecting the first empty cell. >=48dp tall so it stays an easy touch target.
+    @Composable
+    private fun KeypadHandle() {
+        val pal = LocalSudokuPalette.current
+        Box(
+            Modifier.fillMaxWidth().padding(top = 8.dp).height(48.dp)
+                .clip(RoundedCornerShape(10.dp)).background(pal.btn)
+                .clickable { viewModel.summonKeypad() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("▴  Keypad", color = pal.txtDim, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 
