@@ -6,3 +6,4 @@ Topics:
 - [Declaring tool metadata (name, version, etc.)](tool_metadata)
 - [Using the LightOS Emulator](system_app)
 
+# CI verification test - safe to delete
