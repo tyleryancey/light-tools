@@ -72,8 +72,27 @@ class SyncEngineTest {
             pendingExternal = false,
         )
         val externalLookup: (String) -> TxnRef? = { id -> if (id == "TRN-9") existing else null }
-        // Even if a dedup candidate exists, the external-id match takes precedence.
-        val dedupLookup: (String) -> List<TxnRef> = { listOf(existing) }
+        val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)
+        // A row distinct from `existing` that WOULD independently qualify as a cross-source
+        // LinkCrossSource candidate: different id, non-SimpleFIN source, and within the 1-day
+        // window. This proves rule 1 (external match) is checked before rule 2 (cross-source
+        // dedup) actually runs — not merely that rule 2's own source/window guards happen to
+        // reject this particular fake. If the engine's branch order were swapped, this test
+        // would now fail with a LinkCrossSource op instead of UpdateExternalFields.
+        val crossSourceCandidate = TxnRef(
+            id = 88L,
+            accountId = ACCOUNT_ID,
+            source = TransactionSource.MANUAL,
+            status = TransactionStatus.CONFIRMED,
+            categoryId = null,
+            externalId = null,
+            postedEpochDay = txn.postedEpochDay,
+            amountMinor = txn.amountMinor,
+            payee = txn.payee,
+            pendingExternal = false,
+        )
+        val dedupLookup: (String) -> List<TxnRef> =
+            { hash -> if (hash == dedupHash) listOf(crossSourceCandidate) else emptyList() }
         val rules = listOf(
             CategoryRule(id = 1L, payeeContains = "coffee", categoryId = 42L, enabled = true),
         )
