@@ -26,6 +26,7 @@ class AddEntryViewModel(private val repository: LedgerRepository) : LightViewMod
 
     init {
         viewModelScope.launch {
+            repository.ensureSeeded()
             _uiState.value = _uiState.value.copy(categories = repository.listCategories())
         }
     }

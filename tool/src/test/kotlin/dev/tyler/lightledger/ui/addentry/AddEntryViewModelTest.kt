@@ -28,6 +28,12 @@ class AddEntryViewModelTest {
 
     @AfterTest fun tearDown() { Dispatchers.resetMain() }
 
+    @Test fun seedsCategoriesOnFirstLaunchWhenRepoNotYetSeeded() = runTest {
+        val vm = AddEntryViewModel(repository)
+        advanceUntilIdle()
+        assertEquals(8, vm.uiState.value.categories.size)
+    }
+
     @Test fun digitsBuildAmountText() = runTest {
         repository.ensureSeeded()
         val vm = AddEntryViewModel(repository)
