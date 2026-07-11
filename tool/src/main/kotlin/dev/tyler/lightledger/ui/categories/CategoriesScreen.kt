@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,7 +47,7 @@ class CategoriesScreen(
         val themeColors by LightThemeController.colors.collectAsState()
         val categories by viewModel.categories.collectAsState()
         var adding by remember { mutableStateOf(false) }
-        val nameFieldState = rememberTextFieldState("")
+        val nameFieldState = remember(adding) { TextFieldState() }
         val keyboardOptionsFlow = rememberKeyboardOptions()
 
         LightTheme(colors = themeColors) {
