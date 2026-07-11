@@ -18,4 +18,5 @@ abstract class LedgerDatabase : RoomDatabase() {
     internal abstract fun accountDao(): AccountDao
     internal abstract fun transactionDao(): TransactionDao
     internal abstract fun categoryDao(): CategoryDao
+    internal abstract fun ruleDao(): RuleDao
 }

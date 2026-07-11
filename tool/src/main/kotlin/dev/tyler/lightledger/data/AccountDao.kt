@@ -14,4 +14,13 @@ internal interface AccountDao {
 
     @Query("SELECT * FROM accounts WHERE kind = 'MANUAL' AND archived = 0 LIMIT 1")
     fun findManualAccount(): AccountEntity?
+
+    @Query("SELECT * FROM accounts WHERE externalId = :externalId LIMIT 1")
+    fun findByExternalId(externalId: String): AccountEntity?
+
+    @Query("UPDATE accounts SET name = :name, currency = :currency WHERE id = :id")
+    fun updateAccount(id: Long, name: String, currency: String): Int
+
+    @Query("DELETE FROM accounts WHERE kind = 'SIMPLEFIN'")
+    fun deleteSimpleFinAccounts(): Int
 }

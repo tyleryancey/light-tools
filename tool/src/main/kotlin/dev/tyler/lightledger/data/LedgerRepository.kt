@@ -1,5 +1,7 @@
 package dev.tyler.lightledger.data
 
+import dev.tyler.lightledger.domain.CategoryRule
+import dev.tyler.lightledger.domain.PastConfirmation
 import java.time.YearMonth
 
 interface LedgerRepository {
@@ -16,4 +18,59 @@ interface LedgerRepository {
     suspend fun updateTransactionMemo(id: Long, memo: String)
     suspend fun deleteTransaction(id: Long)
     suspend fun needsReviewCount(): Int
+
+    // --- SimpleFIN sync + review inbox (M3a) ---
+
+    /** Find-or-update-then-insert a SIMPLEFIN account by its external id; returns the account id. */
+    suspend fun upsertSimpleFinAccount(externalId: String, name: String, currency: String): Long
+
+    /** Look up an existing row already linked to this account+externalId (idempotent re-sync). */
+    suspend fun findTransactionByExternal(accountId: Long, externalId: String): TxnRef?
+
+    /** Candidate rows sharing a dedup hash, for cross-source dedup matching. */
+    suspend fun findDedupCandidates(dedupHash: String): List<TxnRef>
+
+    /** Insert a brand-new externally sourced (SIMPLEFIN) transaction; returns the new id. */
+    suspend fun insertExternalTransaction(
+        accountId: Long,
+        postedEpochDay: Long,
+        amountMinor: Long,
+        payee: String,
+        memo: String,
+        categoryId: Long?,
+        status: String,
+        externalId: String,
+        pendingExternal: Boolean,
+        dedupHash: String,
+    ): Long
+
+    /** Refresh the mutable fields of an already-linked external row. Never touches categoryId/status. */
+    suspend fun updateExternalTransactionFields(
+        id: Long,
+        amountMinor: Long,
+        payee: String,
+        postedEpochDay: Long,
+        pendingExternal: Boolean,
+    )
+
+    /** Adopt an externalId onto an existing (e.g. manual/CSV) row for cross-source linking. */
+    suspend fun adoptExternalId(id: Long, externalId: String)
+
+    /** NEEDS_REVIEW rows, newest first, with their account's display name. */
+    suspend fun listReviewInbox(): List<ReviewItem>
+
+    /** Assign a category and mark a NEEDS_REVIEW row CONFIRMED. */
+    suspend fun confirmReview(id: Long, categoryId: Long)
+
+    /** All CONFIRMED payee/category pairs (payee normalized) for 3-strike rule learning. */
+    suspend fun pastConfirmations(): List<PastConfirmation>
+
+    /** Persist a learned auto-categorize rule; payeeContains is normalized before storage. */
+    suspend fun insertRule(payeeContains: String, categoryId: Long)
+
+    /** Enabled auto-categorize rules. */
+    suspend fun listRules(): List<CategoryRule>
+
+    /** Remove all SIMPLEFIN accounts and their transactions (Settings "Disconnect & forget"). */
+    suspend fun deleteSimpleFinData()
 }

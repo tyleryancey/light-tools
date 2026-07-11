@@ -87,4 +87,228 @@ class LedgerRepositoryContractTest {
         repo.ensureSeeded()
         assertEquals(0, repo.needsReviewCount())
     }
+
+    @Test fun upsertSimpleFinAccountInsertsThenUpdatesSameRow() = runTest {
+        val repo = FakeLedgerRepository()
+        val id1 = repo.upsertSimpleFinAccount(externalId = "acc-1", name = "Checking", currency = "USD")
+        repo.insertExternalTransaction(
+            accountId = id1,
+            postedEpochDay = 100L,
+            amountMinor = -100L,
+            payee = "Test",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "hash-1",
+        )
+
+        val id2 = repo.upsertSimpleFinAccount(externalId = "acc-1", name = "Checking Renamed", currency = "USD")
+
+        assertEquals(id1, id2)
+        assertEquals("Checking Renamed", repo.listReviewInbox().first().accountName)
+    }
+
+    @Test fun insertExternalTransactionIsFindableByExternalId() = runTest {
+        val repo = FakeLedgerRepository()
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+
+        val id = repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 100L,
+            amountMinor = -500L,
+            payee = "Coffee Shop",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "hash-1",
+        )
+
+        val found = repo.findTransactionByExternal(accountId, "txn-1")
+        assertNotNull(found)
+        assertEquals(id, found.id)
+        assertEquals(-500L, found.amountMinor)
+        assertEquals(TransactionStatus.NEEDS_REVIEW, found.status)
+
+        assertNull(repo.findTransactionByExternal(accountId, "no-such-txn"))
+    }
+
+    @Test fun confirmReviewSetsConfirmedAndCategoryAndDropsFromInbox() = runTest {
+        val repo = FakeLedgerRepository()
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        val category = repo.addCategory("Groceries")
+        val id = repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 100L,
+            amountMinor = -500L,
+            payee = "Store",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "hash-1",
+        )
+        assertEquals(1, repo.listReviewInbox().size)
+
+        repo.confirmReview(id, category.id)
+
+        assertTrue(repo.listReviewInbox().isEmpty())
+        val ref = repo.findTransactionByExternal(accountId, "txn-1")
+        assertEquals(TransactionStatus.CONFIRMED, ref?.status)
+        assertEquals(category.id, ref?.categoryId)
+    }
+
+    @Test fun listReviewInboxReturnsOnlyNeedsReviewNewestFirstWithAccountName() = runTest {
+        val repo = FakeLedgerRepository()
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        val category = repo.addCategory("Groceries")
+        repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 100L,
+            amountMinor = -100L,
+            payee = "Old",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-old",
+            pendingExternal = false,
+            dedupHash = "hash-old",
+        )
+        val confirmedId = repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 150L,
+            amountMinor = -200L,
+            payee = "AlreadyConfirmed",
+            memo = "",
+            categoryId = category.id,
+            status = TransactionStatus.CONFIRMED,
+            externalId = "txn-confirmed",
+            pendingExternal = false,
+            dedupHash = "hash-confirmed",
+        )
+        repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 200L,
+            amountMinor = -300L,
+            payee = "New",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-new",
+            pendingExternal = false,
+            dedupHash = "hash-new",
+        )
+
+        val inbox = repo.listReviewInbox()
+
+        assertEquals(2, inbox.size)
+        assertEquals("New", inbox[0].payee)
+        assertEquals("Old", inbox[1].payee)
+        assertTrue(inbox.all { it.accountName == "Checking" })
+        assertTrue(inbox.none { it.id == confirmedId })
+    }
+
+    @Test fun findDedupCandidatesReturnsRowsSharingHash() = runTest {
+        val repo = FakeLedgerRepository()
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        val id1 = repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 100L,
+            amountMinor = -500L,
+            payee = "Coffee",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "shared-hash",
+        )
+        repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 200L,
+            amountMinor = -999L,
+            payee = "Different",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-2",
+            pendingExternal = false,
+            dedupHash = "other-hash",
+        )
+
+        val candidates = repo.findDedupCandidates("shared-hash")
+
+        assertEquals(1, candidates.size)
+        assertEquals(id1, candidates.first().id)
+    }
+
+    @Test fun insertRuleAndListRulesRoundTrip() = runTest {
+        val repo = FakeLedgerRepository()
+        val category = repo.addCategory("Dining")
+
+        repo.insertRule("STARBUCKS", category.id)
+        val rules = repo.listRules()
+
+        assertEquals(1, rules.size)
+        assertEquals("starbucks", rules.first().payeeContains)
+        assertEquals(category.id, rules.first().categoryId)
+        assertTrue(rules.first().enabled)
+    }
+
+    @Test fun pastConfirmationsNormalizesPayeeAndOnlyIncludesConfirmedWithCategory() = runTest {
+        val repo = FakeLedgerRepository()
+        repo.ensureSeeded()
+        val category = repo.listCategories().first()
+        repo.addManualTransaction(amountMinor = -500L, payee = "Starbucks 12345", categoryId = category.id)
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 100L,
+            amountMinor = -600L,
+            payee = "Uncategorized",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "hash-1",
+        )
+
+        val past = repo.pastConfirmations()
+
+        assertEquals(1, past.size)
+        assertEquals("starbucks", past.first().normalizedPayee)
+        assertEquals(category.id, past.first().categoryId)
+    }
+
+    @Test fun deleteSimpleFinDataRemovesOnlySimpleFinAccountsAndTransactions() = runTest {
+        val repo = FakeLedgerRepository()
+        repo.ensureSeeded()
+        val category = repo.listCategories().first()
+        val manualId = repo.addManualTransaction(amountMinor = -100L, payee = "Manual", categoryId = category.id)
+
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = 100L,
+            amountMinor = -600L,
+            payee = "External",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "hash-1",
+        )
+
+        repo.deleteSimpleFinData()
+
+        assertNotNull(repo.getTransaction(manualId))
+        assertNull(repo.findTransactionByExternal(accountId, "txn-1"))
+        assertEquals(0, repo.needsReviewCount())
+    }
 }

@@ -1,7 +1,9 @@
 package dev.tyler.lightledger.data
 
+import dev.tyler.lightledger.domain.CategoryRule
 import dev.tyler.lightledger.domain.DedupHash
 import dev.tyler.lightledger.domain.LedgerMath
+import dev.tyler.lightledger.domain.PastConfirmation
 import dev.tyler.lightledger.domain.TransactionAmount
 import java.time.LocalDate
 import java.time.YearMonth
@@ -16,6 +18,7 @@ class RoomLedgerRepository private constructor(
     private val accountDao = database.accountDao()
     private val transactionDao = database.transactionDao()
     private val categoryDao = database.categoryDao()
+    private val ruleDao = database.ruleDao()
     private val seedMutex = Mutex()
 
     override suspend fun ensureSeeded() = withContext(Dispatchers.IO) {
@@ -120,6 +123,109 @@ class RoomLedgerRepository private constructor(
         transactionDao.countNeedsReview()
     }
 
+    override suspend fun upsertSimpleFinAccount(
+        externalId: String,
+        name: String,
+        currency: String,
+    ): Long = withContext(Dispatchers.IO) {
+        val existing = accountDao.findByExternalId(externalId)
+        if (existing != null) {
+            accountDao.updateAccount(existing.id, name, currency)
+            existing.id
+        } else {
+            accountDao.insert(
+                AccountEntity(name = name, kind = AccountKind.SIMPLEFIN, currency = currency, externalId = externalId),
+            )
+        }
+    }
+
+    override suspend fun findTransactionByExternal(accountId: Long, externalId: String): TxnRef? =
+        withContext(Dispatchers.IO) {
+            transactionDao.findByExternalId(accountId, externalId)?.toTxnRef()
+        }
+
+    override suspend fun findDedupCandidates(dedupHash: String): List<TxnRef> = withContext(Dispatchers.IO) {
+        transactionDao.findByDedupHash(dedupHash).map { it.toTxnRef() }
+    }
+
+    override suspend fun insertExternalTransaction(
+        accountId: Long,
+        postedEpochDay: Long,
+        amountMinor: Long,
+        payee: String,
+        memo: String,
+        categoryId: Long?,
+        status: String,
+        externalId: String,
+        pendingExternal: Boolean,
+        dedupHash: String,
+    ): Long = withContext(Dispatchers.IO) {
+        transactionDao.insert(
+            TransactionEntity(
+                accountId = accountId,
+                postedEpochDay = postedEpochDay,
+                amountMinor = amountMinor,
+                payee = payee,
+                memo = memo,
+                categoryId = categoryId,
+                status = status,
+                source = TransactionSource.SIMPLEFIN,
+                externalId = externalId,
+                pendingExternal = pendingExternal,
+                dedupHash = dedupHash,
+                createdAtEpochMs = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    override suspend fun updateExternalTransactionFields(
+        id: Long,
+        amountMinor: Long,
+        payee: String,
+        postedEpochDay: Long,
+        pendingExternal: Boolean,
+    ): Unit = withContext(Dispatchers.IO) {
+        transactionDao.updateExternalFields(id, amountMinor, payee, postedEpochDay, pendingExternal)
+        Unit
+    }
+
+    override suspend fun adoptExternalId(id: Long, externalId: String): Unit = withContext(Dispatchers.IO) {
+        transactionDao.setExternalId(id, externalId)
+        Unit
+    }
+
+    override suspend fun listReviewInbox(): List<ReviewItem> = withContext(Dispatchers.IO) {
+        transactionDao.listNeedsReviewWithAccount()
+    }
+
+    override suspend fun confirmReview(id: Long, categoryId: Long): Unit = withContext(Dispatchers.IO) {
+        transactionDao.confirm(id, categoryId)
+        Unit
+    }
+
+    override suspend fun pastConfirmations(): List<PastConfirmation> = withContext(Dispatchers.IO) {
+        transactionDao.listConfirmedPayeeCategory().map {
+            PastConfirmation(normalizedPayee = DedupHash.normalizePayee(it.payee), categoryId = it.categoryId)
+        }
+    }
+
+    override suspend fun insertRule(payeeContains: String, categoryId: Long): Unit = withContext(Dispatchers.IO) {
+        ruleDao.insert(RuleEntity(payeeContains = DedupHash.normalizePayee(payeeContains), categoryId = categoryId))
+        Unit
+    }
+
+    override suspend fun listRules(): List<CategoryRule> = withContext(Dispatchers.IO) {
+        ruleDao.listEnabled().map { it.toDomain() }
+    }
+
+    override suspend fun deleteSimpleFinData(): Unit = withContext(Dispatchers.IO) {
+        // Delete transactions first: the query targets accountId IN (SIMPLEFIN accounts),
+        // so the accounts must still exist when it runs.
+        transactionDao.deleteBySimpleFinAccounts()
+        accountDao.deleteSimpleFinAccounts()
+        Unit
+    }
+
     companion object {
         const val DATABASE_NAME = "ledger.db"
         private const val DEFAULT_CURRENCY = "USD"
@@ -148,4 +254,24 @@ private fun TransactionEntity.toDomain() = Transaction(
     payee = payee,
     memo = memo,
     categoryId = categoryId,
+)
+
+private fun TransactionEntity.toTxnRef() = TxnRef(
+    id = id,
+    accountId = accountId,
+    source = source,
+    status = status,
+    categoryId = categoryId,
+    externalId = externalId,
+    postedEpochDay = postedEpochDay,
+    amountMinor = amountMinor,
+    payee = payee,
+    pendingExternal = pendingExternal,
+)
+
+private fun RuleEntity.toDomain() = CategoryRule(
+    id = id,
+    payeeContains = payeeContains,
+    categoryId = categoryId,
+    enabled = enabled,
 )
