@@ -6,10 +6,6 @@ on:
     - cron: '0 9 * * 1'
   workflow_dispatch: {}
 
-permissions:
-  contents: write
-  pull-requests: write
-
 concurrency:
   group: sync-upstream
   cancel-in-progress: false
@@ -18,6 +14,8 @@ jobs:
   sync-main:
     name: Fast-forward main from lightphone/light-sdk
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       main-sha: ${{ steps.ff.outputs.sha }}
     steps:
@@ -45,6 +43,9 @@ jobs:
     name: Merge main into ${{ matrix.branch }}
     needs: sync-main
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -61,33 +62,47 @@ jobs:
           git config user.name "light-tools sync bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Attempt merge from main
-        id: merge
-        run: |
-          if git merge origin/main --no-edit; then
-            echo "conflict=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "conflict=true" >> "$GITHUB_OUTPUT"
-            git add -A
-            git commit -m "Merge main into ${{ matrix.branch }} (conflicts need manual resolution)"
-          fi
-
-      - name: Push clean merge directly
-        if: steps.merge.outputs.conflict == 'false'
-        run: git push origin HEAD:${{ matrix.branch }}
-
-      - name: Push conflicted merge to a sync branch and open a PR
-        if: steps.merge.outputs.conflict == 'true'
+      - name: Check for an already-open conflict-resolution PR
+        id: check-pr
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sync_branch="sync/main-into-${{ matrix.branch }}"
-          git push origin HEAD:"$sync_branch" --force
-          existing_pr=$(gh pr list --head "$sync_branch" --base "${{ matrix.branch }}" --json number --jq '.[0].number' || true)
-          if [ -z "$existing_pr" ]; then
-            gh pr create \
-              --base "${{ matrix.branch }}" \
-              --head "$sync_branch" \
-              --title "Sync main into ${{ matrix.branch }}: manual conflict resolution needed" \
-              --body "The scheduled upstream sync could not cleanly merge \`main\` into \`${{ matrix.branch }}\`. This PR contains the conflicted merge — please resolve the conflict markers locally and push fixes to \`$sync_branch\`."
+          existing_pr=$(gh pr list --head "$sync_branch" --base "${{ matrix.branch }}" --state open --json number --jq '.[0].number // empty')
+          echo "sync_branch=$sync_branch" >> "$GITHUB_OUTPUT"
+          echo "existing_pr=$existing_pr" >> "$GITHUB_OUTPUT"
+
+      - name: Attempt merge from main
+        id: merge
+        if: steps.check-pr.outputs.existing_pr == ''
+        run: |
+          if git merge origin/main --no-edit; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "$(git ls-files -u)" ]; then
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            git add -A
+            git commit -m "Merge main into ${{ matrix.branch }} (conflicts need manual resolution)"
+          else
+            echo "::error::git merge failed for a reason other than a content conflict" >&2
+            exit 1
           fi
+
+      - name: Push clean merge directly
+        if: steps.check-pr.outputs.existing_pr == '' && steps.merge.outputs.conflict == 'false'
+        run: git push origin HEAD:${{ matrix.branch }}
+
+      - name: Push conflicted merge to a sync branch and open a PR
+        if: steps.check-pr.outputs.existing_pr == '' && steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git push origin HEAD:"${{ steps.check-pr.outputs.sync_branch }}"
+          gh pr create \
+            --base "${{ matrix.branch }}" \
+            --head "${{ steps.check-pr.outputs.sync_branch }}" \
+            --title "Sync main into ${{ matrix.branch }}: manual conflict resolution needed" \
+            --body "The scheduled upstream sync could not cleanly merge \`main\` into \`${{ matrix.branch }}\`. This PR contains the conflicted merge — please resolve the conflict markers locally and push fixes to \`${{ steps.check-pr.outputs.sync_branch }}\`. This automation will not touch this branch again until this PR is closed or merged, so your fixes are safe here."
+
+      - name: Skip — conflict-resolution PR already open
+        if: steps.check-pr.outputs.existing_pr != ''
+        run: echo "PR #${{ steps.check-pr.outputs.existing_pr }} is already open for ${{ matrix.branch }}; leaving it alone until it's resolved."
