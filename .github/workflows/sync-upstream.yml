@@ -1,0 +1,93 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC.
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync-main:
+    name: Fast-forward main from lightphone/light-sdk
+    runs-on: ubuntu-latest
+    outputs:
+      main-sha: ${{ steps.ff.outputs.sha }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "light-tools sync bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Fetch and fast-forward from upstream
+        id: ff
+        run: |
+          git remote add upstream https://github.com/lightphone/light-sdk.git
+          git fetch upstream main
+          git merge --ff-only upstream/main
+          git push origin main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  sync-branches:
+    name: Merge main into ${{ matrix.branch }}
+    needs: sync-main
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [sudoku, ledger]
+    steps:
+      - name: Checkout ${{ matrix.branch }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "light-tools sync bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Attempt merge from main
+        id: merge
+        run: |
+          if git merge origin/main --no-edit; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            git add -A
+            git commit -m "Merge main into ${{ matrix.branch }} (conflicts need manual resolution)"
+          fi
+
+      - name: Push clean merge directly
+        if: steps.merge.outputs.conflict == 'false'
+        run: git push origin HEAD:${{ matrix.branch }}
+
+      - name: Push conflicted merge to a sync branch and open a PR
+        if: steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sync_branch="sync/main-into-${{ matrix.branch }}"
+          git push origin HEAD:"$sync_branch" --force
+          existing_pr=$(gh pr list --head "$sync_branch" --base "${{ matrix.branch }}" --json number --jq '.[0].number' || true)
+          if [ -z "$existing_pr" ]; then
+            gh pr create \
+              --base "${{ matrix.branch }}" \
+              --head "$sync_branch" \
+              --title "Sync main into ${{ matrix.branch }}: manual conflict resolution needed" \
+              --body "The scheduled upstream sync could not cleanly merge \`main\` into \`${{ matrix.branch }}\`. This PR contains the conflicted merge — please resolve the conflict markers locally and push fixes to \`$sync_branch\`."
+          fi
