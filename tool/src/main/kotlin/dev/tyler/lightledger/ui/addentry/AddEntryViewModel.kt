@@ -75,6 +75,7 @@ class AddEntryViewModel(private val repository: LedgerRepository) : LightViewMod
     }
 
     override fun onBackPressed(): Boolean {
+        if (_uiState.value.saved) return false
         return when (_uiState.value.step) {
             AddEntryStep.PAYEE -> {
                 _uiState.value = _uiState.value.copy(step = AddEntryStep.AMOUNT)

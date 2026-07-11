@@ -88,4 +88,21 @@ class AddEntryViewModelTest {
         val vm = AddEntryViewModel(repository)
         assertFalse(vm.onBackPressed())
     }
+
+    @Test fun backAfterSaveDismissesInsteadOfSteppingBack() = runTest {
+        repository.ensureSeeded()
+        val vm = AddEntryViewModel(repository)
+        advanceUntilIdle()
+        vm.onDigit("4")
+        vm.onDecimal()
+        vm.onDigit("5")
+        vm.confirmAmount()
+        vm.confirmPayee("Coffee Shop")
+        val category = repository.listCategories().first()
+        vm.selectCategory(category)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.saved)
+        assertFalse(vm.onBackPressed())
+    }
 }
