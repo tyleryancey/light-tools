@@ -37,15 +37,13 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import dev.tyler.lightledger.data.LedgerDatabase
 import dev.tyler.lightledger.data.RoomLedgerRepository
+import dev.tyler.lightledger.data.SIMPLEFIN_SYNC_JOB_KEY
 import dev.tyler.lightledger.ui.addentry.AddEntryScreen
 import dev.tyler.lightledger.ui.history.HistoryScreen
 import dev.tyler.lightledger.ui.review.ReviewScreen
 import dev.tyler.lightledger.ui.settings.SettingsScreen
 import java.time.YearMonth
 import java.util.Locale
-
-/** Must match the `@LightJob("simplefin-sync")` key registered in `simplefin/LedgerJobs.kt`. */
-private const val SYNC_JOB_KEY = "simplefin-sync"
 
 @InitialScreen
 class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeViewModel>(sealedActivity) {
@@ -65,12 +63,19 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
         val state by viewModel.uiState.collectAsState()
         var syncing by remember { mutableStateOf(false) }
 
-        // Opportunistic background sync: fires at most once per Home-open, only when
-        // SimpleFIN is connected and the last sync is stale (see
-        // HomeViewModel.isOpportunisticSyncDue). Never blocks the UI.
-        LaunchedEffect(Unit) {
+        // Opportunistic background sync: fires whenever Home is shown — first mount AND every
+        // subsequent onScreenShow (nav-back, and app resume-while-on-Home, which doesn't
+        // remount Content() — hence keying on `state.onShowTick` rather than `Unit`) — but only
+        // when SimpleFIN is connected and the last sync is stale (see
+        // HomeViewModel.isOpportunisticSyncDue). The getState guard skips re-enqueuing when a
+        // sync is already Enqueued/Running, since LightWork.enqueue's REPLACE policy would
+        // otherwise cancel and restart an in-flight sync on every re-show. Never blocks the UI.
+        LaunchedEffect(state.onShowTick) {
             if (viewModel.isOpportunisticSyncDue(System.currentTimeMillis())) {
-                LightWork.enqueue(lightContext, SYNC_JOB_KEY)
+                val current = LightWork.getState(lightContext, SIMPLEFIN_SYNC_JOB_KEY)
+                if (current !is LightJobState.Enqueued && current !is LightJobState.Running) {
+                    LightWork.enqueue(lightContext, SIMPLEFIN_SYNC_JOB_KEY)
+                }
             }
         }
 
@@ -81,7 +86,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
         // a fresh cold Home open could fire a spurious reload for a sync that didn't just run.
         LaunchedEffect(Unit) {
             var sawActiveSync = false
-            LightWork.observe(lightContext, SYNC_JOB_KEY).collect { jobState ->
+            LightWork.observe(lightContext, SIMPLEFIN_SYNC_JOB_KEY).collect { jobState ->
                 when (jobState) {
                     is LightJobState.Enqueued, is LightJobState.Running -> {
                         sawActiveSync = true

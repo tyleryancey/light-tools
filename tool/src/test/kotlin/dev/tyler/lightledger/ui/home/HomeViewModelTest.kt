@@ -130,4 +130,19 @@ class HomeViewModelTest {
 
         assertFalse(vm.isOpportunisticSyncDue(nowMs))
     }
+
+    @Test fun opportunisticSyncNotDueWhenLastSyncExactlySixHoursAgo() = runTest {
+        val repository = FakeLedgerRepository()
+        val nowMs = 1_000_000_000L
+        val sixHoursMs = 6L * 60 * 60 * 1000
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs - sixHoursMs
+        }
+        val vm = HomeViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        // Boundary check: the gate is strict `>`, so exactly the interval old is not yet due.
+        assertFalse(vm.isOpportunisticSyncDue(nowMs))
+    }
 }

@@ -24,6 +24,10 @@ data class HomeUiState(
     val categoryTotals: List<CategoryMonthTotal> = emptyList(),
     val needsReviewCount: Int = 0,
     val loading: Boolean = true,
+    /** Bumped once per [HomeViewModel.onScreenShow] — Home isn't remounted on app-resume-while-
+     *  on-screen, so the Screen keys its opportunistic-sync `LaunchedEffect` on this tick
+     *  (instead of `Unit`) to re-run the sync-due check on every show, not just first mount. */
+    val onShowTick: Int = 0,
 )
 
 /**
@@ -42,6 +46,7 @@ class HomeViewModel(
     }
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
+        _uiState.value = _uiState.value.copy(onShowTick = _uiState.value.onShowTick + 1)
         reload()
     }
 

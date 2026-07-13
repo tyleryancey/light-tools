@@ -30,11 +30,9 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import dev.tyler.lightledger.data.LedgerRepository
+import dev.tyler.lightledger.data.SIMPLEFIN_SYNC_JOB_KEY
 import dev.tyler.lightledger.ui.categories.CategoriesScreen
 import kotlinx.coroutines.delay
-
-/** Must match the `@LightJob("simplefin-sync")` key registered in `simplefin/LedgerJobs.kt`. */
-private const val SYNC_JOB_KEY = "simplefin-sync"
 
 /** How long the "synced" status stays up before clearing, so it reads as a calm confirmation
  * rather than a state the user has to dismiss. */
@@ -69,7 +67,7 @@ class SettingsScreen(
         // "reconnect" prompt that persists (no auto-clear) until the next sync attempt.
         LaunchedEffect(Unit) {
             var sawActiveSync = false
-            LightWork.observe(lightContext, SYNC_JOB_KEY).collect { jobState ->
+            LightWork.observe(lightContext, SIMPLEFIN_SYNC_JOB_KEY).collect { jobState ->
                 when (jobState) {
                     is LightJobState.Enqueued, is LightJobState.Running -> {
                         sawActiveSync = true
@@ -130,9 +128,9 @@ class SettingsScreen(
                         state.connected -> ConnectedSimpleFinSection(
                             accountNames = state.accountNames,
                             statusText = syncStatusText,
-                            onSyncNow = { LightWork.enqueue(lightContext, SYNC_JOB_KEY) },
+                            onSyncNow = { LightWork.enqueue(lightContext, SIMPLEFIN_SYNC_JOB_KEY) },
                             onDisconnect = {
-                                LightWork.cancel(lightContext, SYNC_JOB_KEY)
+                                LightWork.cancel(lightContext, SIMPLEFIN_SYNC_JOB_KEY)
                                 viewModel.disconnect()
                             },
                         )

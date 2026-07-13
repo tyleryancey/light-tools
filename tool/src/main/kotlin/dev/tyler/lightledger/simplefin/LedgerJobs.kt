@@ -9,6 +9,7 @@ import dev.tyler.lightledger.data.AndroidAccessUrlCipher
 import dev.tyler.lightledger.data.LedgerDatabase
 import dev.tyler.lightledger.data.LedgerPreferences
 import dev.tyler.lightledger.data.RoomLedgerRepository
+import dev.tyler.lightledger.data.SIMPLEFIN_SYNC_JOB_KEY
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
@@ -28,7 +29,7 @@ private const val WATERMARK_OVERLAP_S = 7L * 24 * 3600
  * The Access URL is a bearer-equivalent credential (§6.1 step 2) — it is decrypted into a
  * local `val` for the duration of this handler and never logged.
  */
-@LightJob("simplefin-sync")
+@LightJob(SIMPLEFIN_SYNC_JOB_KEY)
 val simpleFinSyncJob: LightJobHandler = { ctx, _ ->
     val repo = RoomLedgerRepository.getInstance {
         ctx.buildDatabase(LedgerDatabase::class.java, RoomLedgerRepository.DATABASE_NAME)
