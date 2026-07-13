@@ -51,10 +51,12 @@ private fun defaultClient(): HttpClient = HttpClient(OkHttp) {
 internal class SimpleFinHttpException(val statusCode: Int, message: String) : Exception(message)
 
 /**
- * The subset of [SimpleFinClient] Task 7's sync orchestration depends on — lets
- * `SimpleFinSyncRunner` be unit-tested against a fake instead of real Ktor/HTTP.
+ * The subset of [SimpleFinClient] Task 7's sync orchestration and Task 10's connect flow
+ * depend on — lets `SimpleFinSyncRunner`/`SimpleFinConnectViewModel` be unit-tested against
+ * a fake instead of real Ktor/HTTP.
  */
 interface SimpleFinApi {
+    suspend fun claim(setupTokenBase64: String): Result<String>
     suspend fun fetch(accessUrl: String, startEpochS: Long): Result<AccountSet>
 }
 
@@ -68,7 +70,7 @@ class SimpleFinClient(private val clientFactory: () -> HttpClient = { defaultCli
 
     /** Base64-decodes [setupTokenBase64] into the claim URL, POSTs an empty body, and
      * returns the response body (trimmed) as the Access URL. */
-    suspend fun claim(setupTokenBase64: String): Result<String> = try {
+    override suspend fun claim(setupTokenBase64: String): Result<String> = try {
         val claimUrl = String(Base64.getDecoder().decode(setupTokenBase64.trim()))
         val client = clientFactory()
         try {

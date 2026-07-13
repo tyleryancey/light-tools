@@ -13,8 +13,13 @@ private const val ACCESS_URL = "https://user:pass@bridge.simplefin.org/simplefin
 private const val START_EPOCH_S = 1_700_000_000L
 private const val ACCOUNT_EXTERNAL_ID = "ACT-1"
 
-/** A fake [SimpleFinApi] that returns a canned [Result] and never touches the network. */
+/** A fake [SimpleFinApi] that returns a canned [Result] and never touches the network.
+ * [claim] is unused by these sync-orchestration tests (Task 10's connect flow owns that
+ * path) but must be implemented to satisfy the interface. */
 private class FakeSimpleFinApi(private val result: Result<AccountSet>) : SimpleFinApi {
+    override suspend fun claim(setupTokenBase64: String): Result<String> =
+        Result.failure(UnsupportedOperationException("claim() is not exercised by SimpleFinSyncRunnerTest"))
+
     override suspend fun fetch(accessUrl: String, startEpochS: Long): Result<AccountSet> = result
 }
 
