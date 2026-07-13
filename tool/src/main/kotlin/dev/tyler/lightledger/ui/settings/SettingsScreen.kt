@@ -57,15 +57,30 @@ class SettingsScreen(
         var syncStatusText by remember { mutableStateOf<String?>(null) }
 
         // Watches the background sync job so "Sync now" can show calm, transient status
-        // copy instead of a blocking spinner. A Succeeded emission also triggers a VM
-        // reload so newly-synced account names show up without a manual re-visit.
+        // copy instead of a blocking spinner. Terminal states (Succeeded/Failed) are only
+        // acted on once a sync has actually gone Enqueued/Running during this observation
+        // session (tracked by `sawActiveSync`) — WorkManager retains the previous terminal
+        // WorkInfo, so without that guard the very first emission on a fresh screen entry
+        // can be a stale Succeeded/Failed left over from an earlier session, flashing
+        // status text (and, for Succeeded, firing a redundant reload) for a sync the user
+        // never asked for just now. A live Succeeded triggers a VM reload so newly-synced
+        // account names show up without a manual re-visit. A live Failed (e.g. a decrypt
+        // failure or revoked SimpleFIN credential — see LedgerJobs.kt) surfaces a calm
+        // "reconnect" prompt that persists (no auto-clear) until the next sync attempt.
         LaunchedEffect(Unit) {
+            var sawActiveSync = false
             LightWork.observe(lightContext, SYNC_JOB_KEY).collect { jobState ->
                 when (jobState) {
-                    is LightJobState.Enqueued, is LightJobState.Running -> syncStatusText = "syncing…"
-                    is LightJobState.Succeeded -> {
+                    is LightJobState.Enqueued, is LightJobState.Running -> {
+                        sawActiveSync = true
+                        syncStatusText = "syncing…"
+                    }
+                    is LightJobState.Succeeded -> if (sawActiveSync) {
                         viewModel.reload()
                         syncStatusText = "synced"
+                    }
+                    is LightJobState.Failed -> if (sawActiveSync) {
+                        syncStatusText = "Sync failed — reconnect"
                     }
                     else -> syncStatusText = null
                 }
@@ -99,8 +114,20 @@ class SettingsScreen(
                             .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
                     )
 
-                    if (state.connected) {
-                        ConnectedSimpleFinSection(
+                    // Gate on `loading` so the tappable not-connected row never renders before
+                    // `reload()` resolves — otherwise an already-connected account briefly
+                    // shows the "connect" row, and a fast tap on slow hardware can open the
+                    // paste-connect flow for an account that's already connected.
+                    when {
+                        state.loading -> LightText(
+                            text = "SimpleFIN",
+                            variant = LightTextVariant.Copy,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+                        )
+
+                        state.connected -> ConnectedSimpleFinSection(
                             accountNames = state.accountNames,
                             statusText = syncStatusText,
                             onSyncNow = { LightWork.enqueue(lightContext, SYNC_JOB_KEY) },
@@ -109,8 +136,8 @@ class SettingsScreen(
                                 viewModel.disconnect()
                             },
                         )
-                    } else {
-                        LightText(
+
+                        else -> LightText(
                             text = "SimpleFIN",
                             variant = LightTextVariant.Copy,
                             modifier = Modifier
