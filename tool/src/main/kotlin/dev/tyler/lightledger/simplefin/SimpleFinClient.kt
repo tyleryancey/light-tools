@@ -11,6 +11,7 @@ import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import java.net.URI
 import java.util.Base64
+import kotlinx.coroutines.CancellationException
 
 /**
  * The Access URL split into its credential-free base and a pre-built Basic
@@ -50,16 +51,24 @@ private fun defaultClient(): HttpClient = HttpClient(OkHttp) {
 internal class SimpleFinHttpException(val statusCode: Int, message: String) : Exception(message)
 
 /**
+ * The subset of [SimpleFinClient] Task 7's sync orchestration depends on — lets
+ * `SimpleFinSyncRunner` be unit-tested against a fake instead of real Ktor/HTTP.
+ */
+interface SimpleFinApi {
+    suspend fun fetch(accessUrl: String, startEpochS: Long): Result<AccountSet>
+}
+
+/**
  * SimpleFIN claim + fetch client (CLAUDE-light-ledger.md §6.1). Both the setup token
  * and the claimed Access URL are bearer-equivalent credentials — never logged here.
  * A fresh [HttpClient] is created per operation (via [clientFactory]) and always
  * closed, success or failure.
  */
-class SimpleFinClient(private val clientFactory: () -> HttpClient = { defaultClient() }) {
+class SimpleFinClient(private val clientFactory: () -> HttpClient = { defaultClient() }) : SimpleFinApi {
 
     /** Base64-decodes [setupTokenBase64] into the claim URL, POSTs an empty body, and
      * returns the response body (trimmed) as the Access URL. */
-    suspend fun claim(setupTokenBase64: String): Result<String> = runCatching {
+    suspend fun claim(setupTokenBase64: String): Result<String> = try {
         val claimUrl = String(Base64.getDecoder().decode(setupTokenBase64.trim()))
         val client = clientFactory()
         try {
@@ -70,19 +79,24 @@ class SimpleFinClient(private val clientFactory: () -> HttpClient = { defaultCli
                     message = "SimpleFIN claim HTTP ${response.status.value}",
                 )
             }
-            response.bodyAsText().trim()
+            Result.success(response.bodyAsText().trim())
         } finally {
             client.close()
         }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     /** GETs `<accessUrl>/accounts?start-date=<startEpochS>&pending=1` with an explicit
      * Basic Authorization header, decoding the response into an [AccountSet]. */
-    suspend fun fetch(accessUrl: String, startEpochS: Long): Result<AccountSet> = runCatching {
+    override suspend fun fetch(accessUrl: String, startEpochS: Long): Result<AccountSet> = try {
         val parts = parseAccessUrl(accessUrl)
         val client = clientFactory()
         try {
-            val response = client.get("${parts.baseUrl}/accounts?start-date=$startEpochS&pending=1") {
+            val baseUrl = parts.baseUrl.trimEnd('/')
+            val response = client.get("$baseUrl/accounts?start-date=$startEpochS&pending=1") {
                 parts.basicAuthHeader?.let { header("Authorization", it) }
             }
             if (!response.status.isSuccess()) {
@@ -91,9 +105,13 @@ class SimpleFinClient(private val clientFactory: () -> HttpClient = { defaultCli
                     message = "SimpleFIN fetch HTTP ${response.status.value}",
                 )
             }
-            SimpleFinDecoder.decode(response.bodyAsText())
+            Result.success(SimpleFinDecoder.decode(response.bodyAsText()))
         } finally {
             client.close()
         }
+    } catch (cancellation: CancellationException) {
+        throw cancellation
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 }
