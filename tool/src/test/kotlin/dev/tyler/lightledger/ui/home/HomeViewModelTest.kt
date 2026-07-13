@@ -1,30 +1,63 @@
 package dev.tyler.lightledger.ui.home
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
 import dev.tyler.lightledger.data.CategoryMonthTotal
 import dev.tyler.lightledger.data.FakeLedgerRepository
+import dev.tyler.lightledger.data.LedgerPreferences
+import java.io.File
+import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 
+/**
+ * [DataStore] is created on the same [StandardTestDispatcher] installed as [Dispatchers.Main]
+ * so its internal write-actor coroutine shares `runTest`'s scheduler — `advanceUntilIdle()`
+ * drains both the ViewModel's `viewModelScope` work and the DataStore write in one pass.
+ * Mirrors [dev.tyler.lightledger.ui.settings.SettingsViewModelTest]'s setup.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModelTest {
     private val dispatcher = StandardTestDispatcher()
+    private val dataStoreScopeJob = Job()
+    private lateinit var tempDir: File
+    private lateinit var dataStore: DataStore<Preferences>
 
-    @BeforeTest fun setUp() { Dispatchers.setMain(dispatcher) }
-    @AfterTest fun tearDown() { Dispatchers.resetMain() }
+    @BeforeTest
+    fun setUp() {
+        Dispatchers.setMain(dispatcher)
+        tempDir = Files.createTempDirectory("home-vm-test").toFile()
+        dataStore = PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(dispatcher + dataStoreScopeJob),
+        ) { File(tempDir, "home_test.preferences_pb") }
+    }
+
+    @AfterTest
+    fun tearDown() {
+        dataStoreScopeJob.cancel()
+        tempDir.deleteRecursively()
+        Dispatchers.resetMain()
+    }
 
     @Test fun initSeedsRepositoryAndClearsLoading() = runTest {
         val repository = FakeLedgerRepository()
-        val vm = HomeViewModel(repository)
+        val vm = HomeViewModel(repository, dataStore)
         advanceUntilIdle()
 
         assertEquals(true, repository.seeded)
@@ -33,7 +66,7 @@ class HomeViewModelTest {
 
     @Test fun reloadReflectsNewTransactions() = runTest {
         val repository = FakeLedgerRepository()
-        val vm = HomeViewModel(repository)
+        val vm = HomeViewModel(repository, dataStore)
         advanceUntilIdle()
 
         val groceries = repository.listCategories().first { it.name == "Groceries" }
@@ -51,5 +84,50 @@ class HomeViewModelTest {
             CategoryMonthTotal(2L, "Income", 5000L),
         )
         assertEquals(1200L, totalSpentMinor(totals))
+    }
+
+    @Test fun opportunisticSyncNotDueWithoutBlob() = runTest {
+        val repository = FakeLedgerRepository()
+        val vm = HomeViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        assertFalse(vm.isOpportunisticSyncDue(nowMs = 1_000_000L))
+    }
+
+    @Test fun opportunisticSyncDueWhenBlobPresentAndNeverSynced() = runTest {
+        val repository = FakeLedgerRepository()
+        dataStore.edit { it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob" }
+        val vm = HomeViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        assertTrue(vm.isOpportunisticSyncDue(nowMs = 1_000_000L))
+    }
+
+    @Test fun opportunisticSyncDueWhenLastSyncOlderThanSixHours() = runTest {
+        val repository = FakeLedgerRepository()
+        val nowMs = 1_000_000_000L
+        val sevenHoursMs = 7L * 60 * 60 * 1000
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs - sevenHoursMs
+        }
+        val vm = HomeViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        assertTrue(vm.isOpportunisticSyncDue(nowMs))
+    }
+
+    @Test fun opportunisticSyncNotDueWhenLastSyncWithinSixHours() = runTest {
+        val repository = FakeLedgerRepository()
+        val nowMs = 1_000_000_000L
+        val oneHourMs = 60 * 60 * 1000
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs - oneHourMs
+        }
+        val vm = HomeViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        assertFalse(vm.isOpportunisticSyncDue(nowMs))
     }
 }

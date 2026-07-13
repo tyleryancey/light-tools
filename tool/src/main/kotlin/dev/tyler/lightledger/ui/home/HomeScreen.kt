@@ -7,13 +7,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import com.thelightphone.sdk.InitialScreen
+import com.thelightphone.sdk.LightJobState
 import com.thelightphone.sdk.LightScreen
+import com.thelightphone.sdk.LightWork
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.buildDatabase
 import com.thelightphone.sdk.ui.LightBarButton
@@ -33,9 +39,13 @@ import dev.tyler.lightledger.data.LedgerDatabase
 import dev.tyler.lightledger.data.RoomLedgerRepository
 import dev.tyler.lightledger.ui.addentry.AddEntryScreen
 import dev.tyler.lightledger.ui.history.HistoryScreen
+import dev.tyler.lightledger.ui.review.ReviewScreen
 import dev.tyler.lightledger.ui.settings.SettingsScreen
 import java.time.YearMonth
 import java.util.Locale
+
+/** Must match the `@LightJob("simplefin-sync")` key registered in `simplefin/LedgerJobs.kt`. */
+private const val SYNC_JOB_KEY = "simplefin-sync"
 
 @InitialScreen
 class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeViewModel>(sealedActivity) {
@@ -47,12 +57,46 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
     override val viewModelClass: Class<HomeViewModel>
         get() = HomeViewModel::class.java
 
-    override fun createViewModel() = HomeViewModel(repository)
+    override fun createViewModel() = HomeViewModel(repository, lightContext.dataStore)
 
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
         val state by viewModel.uiState.collectAsState()
+        var syncing by remember { mutableStateOf(false) }
+
+        // Opportunistic background sync: fires at most once per Home-open, only when
+        // SimpleFIN is connected and the last sync is stale (see
+        // HomeViewModel.isOpportunisticSyncDue). Never blocks the UI.
+        LaunchedEffect(Unit) {
+            if (viewModel.isOpportunisticSyncDue(System.currentTimeMillis())) {
+                LightWork.enqueue(lightContext, SYNC_JOB_KEY)
+            }
+        }
+
+        // Watches the sync job so Home can show calm "syncing…" text (never a blocking
+        // spinner) and refresh the summary when a sync actually completes. `sawActiveSync`
+        // guards against a stale retained Succeeded from an earlier session — WorkManager
+        // keeps the last terminal WorkInfo, so without this guard the very first emission on
+        // a fresh cold Home open could fire a spurious reload for a sync that didn't just run.
+        LaunchedEffect(Unit) {
+            var sawActiveSync = false
+            LightWork.observe(lightContext, SYNC_JOB_KEY).collect { jobState ->
+                when (jobState) {
+                    is LightJobState.Enqueued, is LightJobState.Running -> {
+                        sawActiveSync = true
+                        syncing = true
+                    }
+                    is LightJobState.Succeeded -> {
+                        if (sawActiveSync) {
+                            viewModel.reload()
+                        }
+                        syncing = false
+                    }
+                    else -> syncing = false
+                }
+            }
+        }
 
         LightTheme(colors = themeColors) {
             Column(modifier = Modifier.fillMaxSize().background(LightThemeTokens.colors.background)) {
@@ -71,6 +115,22 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
                 if (state.needsReviewCount > 0) {
                     LightText(
                         text = "${state.needsReviewCount} to review →",
+                        variant = LightTextVariant.Detail,
+                        align = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable {
+                                navigateTo(screenFactory = { ReviewScreen(it, repository) }) {
+                                    viewModel.reload()
+                                }
+                            }
+                            .padding(bottom = 0.5f.gridUnitsAsDp()),
+                    )
+                }
+
+                if (syncing) {
+                    LightText(
+                        text = "syncing…",
                         variant = LightTextVariant.Detail,
                         align = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(bottom = 0.5f.gridUnitsAsDp()),
