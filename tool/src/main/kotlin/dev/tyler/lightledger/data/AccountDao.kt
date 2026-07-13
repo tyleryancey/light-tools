@@ -23,4 +23,7 @@ internal interface AccountDao {
 
     @Query("DELETE FROM accounts WHERE kind = 'SIMPLEFIN'")
     fun deleteSimpleFinAccounts(): Int
+
+    @Query("SELECT name FROM accounts WHERE kind = 'SIMPLEFIN' AND archived = 0 ORDER BY name")
+    fun listSimpleFinAccountNames(): List<String>
 }

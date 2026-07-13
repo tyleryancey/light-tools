@@ -73,4 +73,7 @@ interface LedgerRepository {
 
     /** Remove all SIMPLEFIN accounts and their transactions (Settings "Disconnect & forget"). */
     suspend fun deleteSimpleFinData()
+
+    /** Display names of active (non-archived) SIMPLEFIN accounts, alphabetical (Settings). */
+    suspend fun listSimpleFinAccounts(): List<String>
 }

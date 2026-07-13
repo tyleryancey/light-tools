@@ -226,6 +226,10 @@ class RoomLedgerRepository private constructor(
         Unit
     }
 
+    override suspend fun listSimpleFinAccounts(): List<String> = withContext(Dispatchers.IO) {
+        accountDao.listSimpleFinAccountNames()
+    }
+
     companion object {
         const val DATABASE_NAME = "ledger.db"
         private const val DEFAULT_CURRENCY = "USD"

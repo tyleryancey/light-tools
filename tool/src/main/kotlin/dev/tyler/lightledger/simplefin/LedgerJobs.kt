@@ -40,36 +40,49 @@ val simpleFinSyncJob: LightJobHandler = { ctx, _ ->
         // Not configured yet is not an error.
         LightJobResult.Success()
     } else {
-        val accessUrl = AndroidAccessUrlCipher().decryptFromBase64(blob)
+        // A rotated/invalidated Keystore key (e.g. after a lock-screen change) makes decrypt
+        // throw. That's permanent, not transient — surface it as Error so Settings prompts
+        // the user to reconnect, rather than crashing this handler uncaught.
+        val accessUrl = try {
+            AndroidAccessUrlCipher().decryptFromBase64(blob)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Throwable) {
+            null
+        }
 
-        val nowMs = System.currentTimeMillis()
-        val nowS = nowMs / 1000
-        val startEpochS = prefs[LedgerPreferences.SYNC_START_EPOCH_S]
-            ?.let { it - WATERMARK_OVERLAP_S }
-            ?: (nowS - FIRST_SYNC_LOOKBACK_S)
+        if (accessUrl == null) {
+            LightJobResult.Error(mapOf("reason" to "decrypt"))
+        } else {
+            val nowMs = System.currentTimeMillis()
+            val nowS = nowMs / 1000
+            val startEpochS = prefs[LedgerPreferences.SYNC_START_EPOCH_S]
+                ?.let { it - WATERMARK_OVERLAP_S }
+                ?: (nowS - FIRST_SYNC_LOOKBACK_S)
 
-        val result = SimpleFinSyncRunner(repo, SimpleFinClient()).sync(accessUrl, startEpochS)
+            val result = SimpleFinSyncRunner(repo, SimpleFinClient()).sync(accessUrl, startEpochS)
 
-        result.fold(
-            onSuccess = { newCount ->
-                ctx.dataStore.edit { mutablePrefs ->
-                    mutablePrefs[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs
-                    mutablePrefs[LedgerPreferences.SYNC_START_EPOCH_S] = nowS
-                }
-                LightJobResult.Success(mapOf("new" to newCount.toString()))
-            },
-            onFailure = { error ->
-                when {
-                    error is CancellationException -> throw error
-                    // 403 => revoked token; other 4xx => surfaced client error. Neither is
-                    // transient, so don't retry — Settings prompts the user to reconnect.
-                    error is SimpleFinHttpException && error.statusCode in 400..499 ->
-                        LightJobResult.Error(mapOf("reason" to error.statusCode.toString()))
-                    // IOException, 5xx (surfaced as SimpleFinHttpException outside 4xx), or
-                    // anything else unexpected: transient, let WorkManager back off and retry.
-                    else -> LightJobResult.Retry
-                }
-            },
-        )
+            result.fold(
+                onSuccess = { newCount ->
+                    ctx.dataStore.edit { mutablePrefs ->
+                        mutablePrefs[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs
+                        mutablePrefs[LedgerPreferences.SYNC_START_EPOCH_S] = nowS
+                    }
+                    LightJobResult.Success(mapOf("new" to newCount.toString()))
+                },
+                onFailure = { error ->
+                    when {
+                        error is CancellationException -> throw error
+                        // 403 => revoked token; other 4xx => surfaced client error. Neither is
+                        // transient, so don't retry — Settings prompts the user to reconnect.
+                        error is SimpleFinHttpException && error.statusCode in 400..499 ->
+                            LightJobResult.Error(mapOf("reason" to error.statusCode.toString()))
+                        // IOException, 5xx (surfaced as SimpleFinHttpException outside 4xx), or
+                        // anything else unexpected: transient, let WorkManager back off and retry.
+                        else -> LightJobResult.Retry
+                    }
+                },
+            )
+        }
     }
 }

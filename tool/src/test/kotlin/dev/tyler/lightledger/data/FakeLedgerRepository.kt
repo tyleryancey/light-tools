@@ -264,6 +264,12 @@ class FakeLedgerRepository : LedgerRepository {
         accounts.removeAll { it.kind == AccountKind.SIMPLEFIN }
     }
 
+    // Mirrors AccountDao.listSimpleFinAccountNames' "kind = 'SIMPLEFIN' AND archived = 0 ORDER
+    // BY name". FakeAccount has no `archived` field — nothing in this codebase archives
+    // accounts, so that clause is a no-op here; the kind filter alone is a faithful mirror.
+    override suspend fun listSimpleFinAccounts(): List<String> =
+        accounts.filter { it.kind == AccountKind.SIMPLEFIN }.sortedBy { it.name }.map { it.name }
+
     private fun FakeTxn.toTransaction() = Transaction(
         id = id,
         accountId = accountId,
