@@ -76,6 +76,25 @@ internal interface TransactionDao {
             "WHERE t.status = 'CONFIRMED' AND t.postedEpochDay BETWEEN :startEpochDay AND :endEpochDay",
     )
     fun listConfirmedAmountsInRange(startEpochDay: Long, endEpochDay: Long): List<CategoryAmountRow>
+
+    /** Pending-external rows stuck since before [olderThanEpochDay] — pending-settle candidates. */
+    @Query(
+        "SELECT * FROM transactions WHERE accountId = :accountId AND pendingExternal = 1 " +
+            "AND postedEpochDay <= :olderThanEpochDay",
+    )
+    fun listStalePendingExternalRows(accountId: Long, olderThanEpochDay: Long): List<TransactionEntity>
+
+    /** Settled (non-pending) rows that could be a stale pending row's re-posted replacement. */
+    @Query(
+        "SELECT * FROM transactions WHERE accountId = :accountId AND pendingExternal = 0 " +
+            "AND amountMinor = :amountMinor AND postedEpochDay BETWEEN :minEpochDay AND :maxEpochDay",
+    )
+    fun findSettledMatchRows(
+        accountId: Long,
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TransactionEntity>
 }
 
 /** Narrow projection for [TransactionDao.listConfirmedPayeeCategory]; not exposed outside the data layer. */

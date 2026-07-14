@@ -76,4 +76,17 @@ interface LedgerRepository {
 
     /** Display names of active (non-archived) SIMPLEFIN accounts, alphabetical (Settings). */
     suspend fun listSimpleFinAccounts(): List<String>
+
+    // --- Pending-settle reconciliation (M3b) ---
+
+    /** Pending-external rows for [accountId] posted on/before [olderThanEpochDay] — feeds [dev.tyler.lightledger.simplefin.PendingSettle.plan]'s `pending` input. */
+    suspend fun listStalePendingExternal(accountId: Long, olderThanEpochDay: Long): List<TxnRef>
+
+    /** Settled (non-pending) rows for [accountId] matching [amountMinor] within [minEpochDay]..[maxEpochDay] — feeds [dev.tyler.lightledger.simplefin.PendingSettle.plan]'s `settledCandidates` input. */
+    suspend fun findSettledMatches(
+        accountId: Long,
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TxnRef>
 }

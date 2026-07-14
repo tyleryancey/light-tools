@@ -279,6 +279,28 @@ class FakeLedgerRepository : LedgerRepository {
     override suspend fun listSimpleFinAccounts(): List<String> =
         accounts.filter { it.kind == AccountKind.SIMPLEFIN }.sortedBy { it.name }.map { it.name }
 
+    // Mirrors TransactionDao.listStalePendingExternalRows' "accountId = :accountId AND
+    // pendingExternal = 1 AND postedEpochDay <= :olderThanEpochDay".
+    override suspend fun listStalePendingExternal(accountId: Long, olderThanEpochDay: Long): List<TxnRef> =
+        transactions.filter {
+            it.accountId == accountId && it.pendingExternal && it.postedEpochDay <= olderThanEpochDay
+        }.map { it.toTxnRef() }
+
+    // Mirrors TransactionDao.findSettledMatchRows' "accountId = :accountId AND pendingExternal = 0
+    // AND amountMinor = :amountMinor AND postedEpochDay BETWEEN :minEpochDay AND :maxEpochDay"
+    // (BETWEEN is inclusive on both ends, matched here by the `..` closed range).
+    override suspend fun findSettledMatches(
+        accountId: Long,
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TxnRef> = transactions.filter {
+        it.accountId == accountId &&
+            !it.pendingExternal &&
+            it.amountMinor == amountMinor &&
+            it.postedEpochDay in minEpochDay..maxEpochDay
+    }.map { it.toTxnRef() }
+
     private fun FakeTxn.toTransaction() = Transaction(
         id = id,
         accountId = accountId,
