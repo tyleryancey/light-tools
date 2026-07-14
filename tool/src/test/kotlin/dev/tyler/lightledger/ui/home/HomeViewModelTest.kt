@@ -4,7 +4,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
-import dev.tyler.lightledger.data.CategoryMonthTotal
 import dev.tyler.lightledger.data.FakeLedgerRepository
 import dev.tyler.lightledger.data.LedgerPreferences
 import dev.tyler.lightledger.data.TransactionStatus
@@ -79,14 +78,6 @@ class HomeViewModelTest {
 
         val total = vm.uiState.value.categoryTotals.first { it.categoryId == groceries.id }
         assertEquals(-1200L, total.totalMinor)
-    }
-
-    @Test fun totalSpentMinorSumsOnlyNegativeAmounts() {
-        val totals = listOf(
-            CategoryMonthTotal(1L, "Groceries", -1200L, "USD"),
-            CategoryMonthTotal(2L, "Income", 5000L, "USD"),
-        )
-        assertEquals(1200L, totalSpentMinor(totals))
     }
 
     @Test fun mixedCurrencyMonthSummaryExposesOnlyPrimaryCurrencySpend() = runTest {

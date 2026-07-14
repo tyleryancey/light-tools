@@ -71,6 +71,3 @@ class HomeViewModel(
         return nowMs - lastSync > OPPORTUNISTIC_SYNC_INTERVAL_MS
     }
 }
-
-fun totalSpentMinor(totals: List<CategoryMonthTotal>): Long =
-    totals.filter { it.totalMinor < 0L }.sumOf { -it.totalMinor }

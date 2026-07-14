@@ -13,7 +13,9 @@ sealed interface SettleOp {
     data class MigrateThenDelete(val oldId: Long, val newId: Long, val categoryId: Long) : SettleOp
 
     /** [oldId] vanished from the feed with no reconcilable settled row (or the match was
-     * uncategorized / not user-confirmed) — just delete the stale pending row. */
+     * uncategorized / not user-confirmed, or the only same-amount ±windowDays candidate was
+     * already categorized and so is never a valid migrate target — see [PendingSettle.plan]'s
+     * I-1 KDoc) — just delete the stale pending row. */
     data class DeleteStale(val oldId: Long) : SettleOp
 }
 
@@ -31,6 +33,12 @@ sealed interface SettleOp {
  * doing this reconciliation inside the per-fetch decision. The caller (Task 6's sync runner) is
  * responsible for pre-filtering `pending` and `settledCandidates` to a single account and for
  * actually applying the returned ops.
+ *
+ * I-1 (final-review): a migrate target must be uncategorized. A genuine bank re-post always lands
+ * uncategorized (freshly synced, `NEEDS_REVIEW`), so restricting migration to uncategorized
+ * candidates costs nothing for the real case — but it protects a user's existing category on a
+ * *coincidentally* same-amount, same-window settled row from being silently overwritten by
+ * `confirmReview(newId, categoryId)` in the runner.
  */
 object PendingSettle {
     fun plan(
@@ -57,7 +65,8 @@ object PendingSettle {
                 .filter { s ->
                     s.amountMinor == p.amountMinor &&
                         abs(s.postedEpochDay - p.postedEpochDay) <= windowDays &&
-                        s.id != p.id
+                        s.id != p.id &&
+                        s.categoryId == null // I-1: never migrate onto (and thus overwrite) an already-categorized row
                 }
                 .minWithOrNull(compareBy({ s -> abs(s.postedEpochDay - p.postedEpochDay) }, { s -> s.id }))
 

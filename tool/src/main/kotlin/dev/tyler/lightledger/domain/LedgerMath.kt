@@ -27,10 +27,9 @@ object LedgerMath {
 
     /**
      * The never-sum-across-currencies guard: groups [totals] by currency, sums only each
-     * currency's negative (spend) totals — mirroring [dev.tyler.lightledger.ui.home.totalSpentMinor]
-     * — and returns the (currency, spend) pair with the largest absolute spend. Never adds two
-     * currencies' minor units together, since minor units aren't comparable across currencies.
-     * Returns `null` when [totals] is empty.
+     * currency's negative (spend) totals, and returns the (currency, spend) pair with the largest
+     * absolute spend. Never adds two currencies' minor units together, since minor units aren't
+     * comparable across currencies. Returns `null` when [totals] is empty.
      */
     fun primaryCurrencyTotal(totals: List<CategoryMonthTotal>): Pair<String, Long>? =
         totals
