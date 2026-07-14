@@ -2,13 +2,11 @@ package dev.tyler.lightledger.simplefin
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
-import io.ktor.serialization.kotlinx.json.json
 import java.net.URI
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
@@ -37,11 +35,9 @@ internal fun parseAccessUrl(accessUrl: String): AccessUrlParts {
     return AccessUrlParts(baseUrl = baseUrl, basicAuthHeader = basicAuthHeader)
 }
 
-private fun defaultClient(): HttpClient = HttpClient(OkHttp) {
-    install(ContentNegotiation) {
-        json(SimpleFinDecoder.json)
-    }
-}
+// Responses are read via bodyAsText() + SimpleFinDecoder.decode() (manual decode keeps the
+// tolerant ignoreUnknownKeys Json config in one place), so no ContentNegotiation plugin is needed.
+private fun defaultClient(): HttpClient = HttpClient(OkHttp)
 
 /**
  * Thrown for non-2xx SimpleFIN responses so callers (Task 7's `JOB_SYNC`) can map

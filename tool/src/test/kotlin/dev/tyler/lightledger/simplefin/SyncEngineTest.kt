@@ -110,6 +110,11 @@ class SyncEngineTest {
         // postedEpochDay, pendingExternal) only, so category/status can never be touched here.
     }
 
+    // Covers SyncEngine's LinkCrossSource *decision* logic. Note the injected candidate is a
+    // MANUAL row keyed under the SIMPLEFIN-computed dedupHash — a pairing the M3a runner never
+    // actually produces (DedupHash folds in the local account id, so cross-account hashes differ;
+    // see SimpleFinSyncRunner.applyAccounts). So this locks the decision ahead of M3b, when true
+    // account-agnostic cross-source lookup will make the branch reachable in production.
     @Test fun crossSourceDedupWithinOneDayLinksToExistingManualRow() {
         val txn = mapped(externalId = "TRN-5", postedEpochDay = 19000L, amountMinor = -450L, payee = "Coffee Shop")
         val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)

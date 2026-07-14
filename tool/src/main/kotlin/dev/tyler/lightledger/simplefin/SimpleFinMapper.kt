@@ -15,6 +15,10 @@ data class MappedExternalTxn(
 )
 
 object SimpleFinMapper {
+    // M3a assumes a 2-decimal (minor = 1/100) currency: AmountParser.parseToMinorUnits defaults
+    // to exponent 2, and account.currency is not consulted here. This is correct for USD (all
+    // M3a-supported accounts); non-2dp currencies (e.g. JPY=0, BHD=3) would mis-scale and need a
+    // currency→exponent lookup — deferred to M3b.
     fun toMappedTransactions(account: SimpleFinAccount): List<MappedExternalTxn> =
         account.transactions.map { txn ->
             MappedExternalTxn(

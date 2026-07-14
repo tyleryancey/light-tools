@@ -3,6 +3,7 @@ package dev.tyler.lightledger.simplefin
 import dev.tyler.lightledger.data.LedgerRepository
 import dev.tyler.lightledger.data.TxnRef
 import dev.tyler.lightledger.domain.DedupHash
+import kotlinx.coroutines.CancellationException
 
 /**
  * Orchestrates one SimpleFIN sync pass (CLAUDE-light-ledger.md §6.2 steps 3-5) against an
@@ -22,11 +23,27 @@ class SimpleFinSyncRunner(
      * Fetches [accessUrl] starting from [startEpochS], applies the resulting [SyncPlan] for
      * every account, and returns the number of brand-new transactions inserted. A fetch
      * failure is returned unchanged (preserving [SimpleFinHttpException]/IO/Cancellation) so
-     * the caller can classify it (Retry vs. Error).
+     * the caller can classify it (Retry vs. Error); a persist failure is likewise returned as
+     * a failed [Result] rather than thrown, so a transient DB error becomes Retry, not a
+     * permanent Error.
      */
     suspend fun sync(accessUrl: String, startEpochS: Long): Result<Int> {
         val accountSet = api.fetch(accessUrl, startEpochS).getOrElse { return Result.failure(it) }
 
+        // The persist phase can throw on a transient DB error (SQLite locked / disk full).
+        // Return it as a failed Result so the @LightJob classifies it as Retry rather than a
+        // permanent Error; CancellationException must still propagate for structured concurrency.
+        return try {
+            Result.success(applyAccounts(accountSet))
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    /** Applies the per-account [SyncPlan]s and returns the count of brand-new inserts. */
+    private suspend fun applyAccounts(accountSet: AccountSet): Int {
         var insertedCount = 0
         for (account in accountSet.accounts) {
             // Same dbId feeds the mapper's dedup-hash inputs AND the lookups below — the
@@ -39,6 +56,13 @@ class SimpleFinSyncRunner(
                 repo.findTransactionByExternal(dbId, txn.externalId)?.let { txn.externalId to it }
             }.toMap()
 
+            // M3a caveat: candidates are looked up by *exact* hash, and DedupHash.compute folds
+            // in this SIMPLEFIN account's local dbId — so a MANUAL/CSV row (hashed under its own
+            // account id) can never collide here. That makes SyncEngine's LinkCrossSource branch
+            // inert in production: M3a performs exact-day, same-account dedup only. True
+            // cross-source dedup (account-agnostic / adjacent-day probing) is deferred to M3b;
+            // SyncEngineTest exercises LinkCrossSource with a hand-injected candidate the real
+            // repo would not yet return, so that decision logic is unit-covered ahead of M3b.
             val byDedupHash: Map<String, List<TxnRef>> = mapped.associate { txn ->
                 val hash = DedupHash.compute(dbId, txn.postedEpochDay, txn.amountMinor, txn.payee)
                 hash to repo.findDedupCandidates(hash)
@@ -85,8 +109,10 @@ class SimpleFinSyncRunner(
             }
         }
 
-        // accountSet.errors (subscription lapses etc., §6.1.4) are surfaced to Settings by a
-        // later task, not here — non-fatal per §6.2, so a non-empty list never fails the sync.
-        return Result.success(insertedCount)
+        // accountSet.errors (subscription lapses / "reauthenticate", §6.1.4) are non-fatal per
+        // §6.2, so a non-empty list never fails the sync. Surfacing them to the user as a
+        // reconnect prompt is deferred to M3b — today they are decoded but intentionally not
+        // acted on, so a 200-with-errors syncs no new data without a visible warning.
+        return insertedCount
     }
 }
