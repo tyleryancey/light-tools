@@ -2,6 +2,8 @@ package dev.tyler.lightledger.simplefin
 
 import dev.tyler.lightledger.data.FakeLedgerRepository
 import dev.tyler.lightledger.data.TransactionStatus
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -12,6 +14,18 @@ import kotlinx.coroutines.test.runTest
 private const val ACCESS_URL = "https://user:pass@bridge.simplefin.org/simplefin"
 private const val START_EPOCH_S = 1_700_000_000L
 private const val ACCOUNT_EXTERNAL_ID = "ACT-1"
+
+/** The epoch day [START_EPOCH_S] falls on in the system default zone — used as `syncEpochDay`
+ * for tests that don't exercise pending-settle staleness, so the pass is a guaranteed no-op. */
+private val SYNC_EPOCH_DAY: Long = epochDayOf(START_EPOCH_S)
+
+private fun epochDayOf(epochSeconds: Long): Long =
+    java.time.Instant.ofEpochSecond(epochSeconds).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay()
+
+/** Noon (never a DST-transition hour) on [epochDay] in the system default zone, round-tripping
+ * cleanly back through [SimpleFinMapper]'s Instant -> LocalDate conversion. */
+private fun epochSecondsAtNoon(epochDay: Long): Long =
+    LocalDate.ofEpochDay(epochDay).atTime(12, 0).atZone(ZoneId.systemDefault()).toEpochSecond()
 
 /** A fake [SimpleFinApi] that returns a canned [Result] and never touches the network.
  * [claim] is unused by these sync-orchestration tests (Task 10's connect flow owns that
@@ -78,7 +92,7 @@ class SimpleFinSyncRunnerTest {
         val repo = FakeLedgerRepository()
         val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fixtureAccountSet())))
 
-        runner.sync(ACCESS_URL, START_EPOCH_S)
+        runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY)
 
         val dbId = repo.upsertSimpleFinAccount(ACCOUNT_EXTERNAL_ID, "Checking", "USD")
         val txn = assertNotNull(repo.findTransactionByExternal(dbId, "TRN-NEW-NO-RULE"))
@@ -92,7 +106,7 @@ class SimpleFinSyncRunnerTest {
         repo.insertRule("starbucks", 42L)
         val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fixtureAccountSet())))
 
-        runner.sync(ACCESS_URL, START_EPOCH_S)
+        runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY)
 
         val dbId = repo.upsertSimpleFinAccount(ACCOUNT_EXTERNAL_ID, "Checking", "USD")
         val txn = assertNotNull(repo.findTransactionByExternal(dbId, "TRN-NEW-RULE"))
@@ -118,7 +132,7 @@ class SimpleFinSyncRunnerTest {
         )
         val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fixtureAccountSet())))
 
-        val newCount = runner.sync(ACCESS_URL, START_EPOCH_S).getOrThrow()
+        val outcome = runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY).getOrThrow()
 
         val updated = assertNotNull(repo.findTransactionByExternal(dbId, "TRN-EXISTING"))
         assertEquals(existingId, updated.id)
@@ -130,7 +144,7 @@ class SimpleFinSyncRunnerTest {
         assertEquals("Updated Payee", updated.payee)
         assertTrue(updated.pendingExternal)
         // Only the two genuinely-new transactions count toward "new".
-        assertEquals(2, newCount)
+        assertEquals(2, outcome.newCount)
     }
 
     @Test
@@ -138,7 +152,7 @@ class SimpleFinSyncRunnerTest {
         val repo = FakeLedgerRepository()
         val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fixtureAccountSet())))
 
-        runner.sync(ACCESS_URL, START_EPOCH_S)
+        runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY)
         val dbId = repo.upsertSimpleFinAccount(ACCOUNT_EXTERNAL_ID, "Checking", "USD")
         assertNotNull(repo.findTransactionByExternal(dbId, "TRN-NEW-NO-RULE"))
 
@@ -153,11 +167,186 @@ class SimpleFinSyncRunnerTest {
         val failure = SimpleFinHttpException(403, "SimpleFIN fetch HTTP 403")
         val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.failure(failure)))
 
-        val result = runner.sync(ACCESS_URL, START_EPOCH_S)
+        val result = runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY)
 
         assertTrue(result.isFailure)
         val exception = assertNotNull(result.exceptionOrNull())
         assertTrue(exception is SimpleFinHttpException)
         assertEquals(403, exception.statusCode)
+    }
+
+    @Test
+    fun pendingRowMigratesCategoryOntoNewlySettledRowAndStalePendingRowIsDeleted() = runTest {
+        val repo = FakeLedgerRepository()
+        val oldDay = 19_700L
+        val fetchStartS = epochSecondsAtNoon(oldDay - 30)
+
+        // Fetch 1: a pending SIMPLEFIN transaction lands under external id "OLD".
+        val fetch1 = AccountSet(
+            errors = emptyList(),
+            accounts = listOf(
+                SimpleFinAccount(
+                    id = ACCOUNT_EXTERNAL_ID,
+                    name = "Checking",
+                    currency = "USD",
+                    transactions = listOf(
+                        SimpleFinTransaction(
+                            id = "OLD",
+                            posted = epochSecondsAtNoon(oldDay),
+                            amount = "-12.34",
+                            description = "Grocery Store",
+                            payee = null,
+                            memo = null,
+                            pending = true,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        // syncEpochDay == oldDay: the just-inserted pending row is not aged yet, so fetch 1's
+        // own pending-settle pass must be a no-op.
+        SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fetch1)))
+            .sync(ACCESS_URL, fetchStartS, oldDay)
+            .getOrThrow()
+
+        val dbId = repo.upsertSimpleFinAccount(ACCOUNT_EXTERNAL_ID, "Checking", "USD")
+        val oldId = assertNotNull(repo.findTransactionByExternal(dbId, "OLD")).id
+        // User categorizes the pending row before it settles.
+        repo.confirmReview(oldId, 55L)
+
+        // Fetch 2: "OLD" is gone from the feed (the bank re-posted it under a new id, "NEW"),
+        // settled (pending = false), same amount, posted within PENDING_WINDOW_DAYS of "OLD".
+        val fetch2 = AccountSet(
+            errors = emptyList(),
+            accounts = listOf(
+                SimpleFinAccount(
+                    id = ACCOUNT_EXTERNAL_ID,
+                    name = "Checking",
+                    currency = "USD",
+                    transactions = listOf(
+                        SimpleFinTransaction(
+                            id = "NEW",
+                            posted = epochSecondsAtNoon(oldDay + 2),
+                            amount = "-12.34",
+                            description = "Grocery Store Settled",
+                            payee = null,
+                            memo = null,
+                            pending = false,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        // fetchStartEpochDay (oldDay - 30) covers "OLD"'s posted day, and syncEpochDay is
+        // advanced 10 days past it (> PENDING_AGE_DAYS), so "OLD" is now aged + vanished.
+        SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fetch2)))
+            .sync(ACCESS_URL, fetchStartS, oldDay + 10)
+            .getOrThrow()
+
+        val newTxn = assertNotNull(repo.findTransactionByExternal(dbId, "NEW"))
+        assertEquals(TransactionStatus.CONFIRMED, newTxn.status)
+        assertEquals(55L, newTxn.categoryId)
+        assertNull(repo.getTransaction(oldId))
+    }
+
+    @Test
+    fun crossSourceMatchAdoptsExternalIdOntoExistingManualRowInsteadOfInsertingADuplicate() = runTest {
+        val repo = FakeLedgerRepository()
+        repo.ensureSeeded()
+        val categoryId = repo.listCategories().first().id
+        val manualId = repo.addManualTransaction(amountMinor = -500L, payee = "Coffee Shop", categoryId = categoryId)
+        val manualAccountId = assertNotNull(repo.getTransaction(manualId)).accountId
+        val manualDay = assertNotNull(repo.getTransaction(manualId)).postedEpochDay
+
+        val accountSet = AccountSet(
+            errors = emptyList(),
+            accounts = listOf(
+                SimpleFinAccount(
+                    id = ACCOUNT_EXTERNAL_ID,
+                    name = "Checking",
+                    currency = "USD",
+                    transactions = listOf(
+                        SimpleFinTransaction(
+                            id = "SFX-1",
+                            posted = epochSecondsAtNoon(manualDay),
+                            amount = "-5.00",
+                            description = "Coffee Shop",
+                            payee = null,
+                            memo = null,
+                            pending = false,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(accountSet)))
+
+        val outcome = runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY).getOrThrow()
+
+        // No new row inserted — the existing MANUAL row adopted the externalId.
+        assertEquals(0, outcome.newCount)
+        val linked = assertNotNull(repo.findTransactionByExternal(manualAccountId, "SFX-1"))
+        assertEquals(manualId, linked.id)
+    }
+
+    @Test
+    fun accountSetErrorsAreReturnedInSyncOutcomeWithoutFailingTheSync() = runTest {
+        val repo = FakeLedgerRepository()
+        val accountSet = AccountSet(errors = listOf("Bridge says reauth"), accounts = emptyList())
+        val runner = SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(accountSet)))
+
+        val result = runner.sync(ACCESS_URL, START_EPOCH_S, SYNC_EPOCH_DAY)
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("Bridge says reauth"), result.getOrNull()!!.errors)
+    }
+
+    @Test
+    fun notYetAgedPendingRowSurvivesARefetchWhereItsExternalIdIsAbsent() = runTest {
+        val repo = FakeLedgerRepository()
+        val pendingDay = 19_700L
+        val fetchStartS = epochSecondsAtNoon(pendingDay - 30)
+
+        val fetch1 = AccountSet(
+            errors = emptyList(),
+            accounts = listOf(
+                SimpleFinAccount(
+                    id = ACCOUNT_EXTERNAL_ID,
+                    name = "Checking",
+                    currency = "USD",
+                    transactions = listOf(
+                        SimpleFinTransaction(
+                            id = "STILL-PENDING",
+                            posted = epochSecondsAtNoon(pendingDay),
+                            amount = "-9.00",
+                            description = "Pending Charge",
+                            payee = null,
+                            memo = null,
+                            pending = true,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fetch1)))
+            .sync(ACCESS_URL, fetchStartS, pendingDay)
+            .getOrThrow()
+
+        val dbId = repo.upsertSimpleFinAccount(ACCOUNT_EXTERNAL_ID, "Checking", "USD")
+        assertNotNull(repo.findTransactionByExternal(dbId, "STILL-PENDING"))
+
+        // Re-fetch only 2 days later (< PENDING_AGE_DAYS) with the account now reporting no
+        // transactions at all — "STILL-PENDING" vanished from the feed but hasn't aged yet.
+        val fetch2 = AccountSet(
+            errors = emptyList(),
+            accounts = listOf(
+                SimpleFinAccount(id = ACCOUNT_EXTERNAL_ID, name = "Checking", currency = "USD", transactions = emptyList()),
+            ),
+        )
+        SimpleFinSyncRunner(repo, FakeSimpleFinApi(Result.success(fetch2)))
+            .sync(ACCESS_URL, fetchStartS, pendingDay + 2)
+            .getOrThrow()
+
+        assertNotNull(repo.findTransactionByExternal(dbId, "STILL-PENDING"))
     }
 }

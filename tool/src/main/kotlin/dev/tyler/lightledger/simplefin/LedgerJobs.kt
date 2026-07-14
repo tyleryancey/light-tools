@@ -21,10 +21,9 @@ private const val FIRST_SYNC_LOOKBACK_S = 60L * 24 * 3600
 private const val WATERMARK_OVERLAP_S = 7L * 24 * 3600
 
 /**
- * SimpleFIN sync job (CLAUDE-light-ledger.md §6.2, steps 1-5 and 7 — §6.2.6 pending-settle
- * churn is deferred to M3b). Self-contained per the `@LightJob` contract: builds its own
- * repo from the [com.thelightphone.sdk.SealedLightContext] it receives rather than closing
- * over any app-level singleton.
+ * SimpleFIN sync job (CLAUDE-light-ledger.md §6.2, steps 1-7). Self-contained per the
+ * `@LightJob` contract: builds its own repo from the [com.thelightphone.sdk.SealedLightContext]
+ * it receives rather than closing over any app-level singleton.
  *
  * The Access URL is a bearer-equivalent credential (§6.1 step 2) — it is decrypted into a
  * local `val` for the duration of this handler and never logged.
@@ -60,16 +59,22 @@ val simpleFinSyncJob: LightJobHandler = { ctx, _ ->
             val startEpochS = prefs[LedgerPreferences.SYNC_START_EPOCH_S]
                 ?.let { it - WATERMARK_OVERLAP_S }
                 ?: (nowS - FIRST_SYNC_LOOKBACK_S)
+            val syncEpochDay = java.time.Instant.ofEpochMilli(nowMs)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDate()
+                .toEpochDay()
 
-            val result = SimpleFinSyncRunner(repo, SimpleFinClient()).sync(accessUrl, startEpochS)
+            val result = SimpleFinSyncRunner(repo, SimpleFinClient()).sync(accessUrl, startEpochS, syncEpochDay)
 
             result.fold(
-                onSuccess = { newCount ->
+                onSuccess = { outcome ->
                     ctx.dataStore.edit { mutablePrefs ->
                         mutablePrefs[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs
                         mutablePrefs[LedgerPreferences.SYNC_START_EPOCH_S] = nowS
                     }
-                    LightJobResult.Success(mapOf("new" to newCount.toString()))
+                    // outcome.errors (subscription lapses / "reauthenticate") is intentionally
+                    // unused here — persisting/surfacing it to the user is T7.
+                    LightJobResult.Success(mapOf("new" to outcome.newCount.toString()))
                 },
                 onFailure = { error ->
                     when {

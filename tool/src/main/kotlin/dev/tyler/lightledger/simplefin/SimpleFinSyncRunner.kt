@@ -2,39 +2,67 @@ package dev.tyler.lightledger.simplefin
 
 import dev.tyler.lightledger.data.LedgerRepository
 import dev.tyler.lightledger.data.TxnRef
-import dev.tyler.lightledger.domain.DedupHash
 import kotlinx.coroutines.CancellationException
 
+/** Cross-source dedup candidates are probed within this many days of the incoming txn's
+ * posted day (a bank's SIMPLEFIN post date and a manually-entered date rarely land on the
+ * exact same day). */
+private const val CROSS_SOURCE_WINDOW_DAYS = 1L
+
+/** A pending row is eligible for pending-settle reconciliation once it's this many days old
+ * relative to the current sync's epoch day (CLAUDE-light-ledger.md §6.2.6). */
+private const val PENDING_AGE_DAYS = 5L
+
+/** A stale pending row's settled replacement is searched for within this many days of the
+ * pending row's own posted day. */
+private const val PENDING_WINDOW_DAYS = 4L
+
 /**
- * Orchestrates one SimpleFIN sync pass (CLAUDE-light-ledger.md §6.2 steps 3-5) against an
+ * Outcome of one [SimpleFinSyncRunner.sync] pass: the number of brand-new transactions
+ * inserted, plus any non-fatal `errors` SimpleFIN reported alongside a 200 (subscription
+ * lapses / "reauthenticate", §6.1.4). Persisting/surfacing those errors to the user is T7 —
+ * this type just carries them out of the runner so the caller can decide.
+ */
+data class SyncOutcome(val newCount: Int, val errors: List<String>)
+
+/**
+ * Orchestrates one SimpleFIN sync pass (CLAUDE-light-ledger.md §6.2 steps 3-6) against an
  * already-fetched [SimpleFinApi] and an injected [LedgerRepository] — pure orchestration,
  * no Android/SealedLightContext, so it's directly unit-testable with fakes. The `@LightJob`
  * handler in LedgerJobs.kt owns everything this class doesn't: decrypting the Access URL,
  * computing the watermark, and persisting `simplefin_last_sync_epoch_ms` /
  * `simplefin_sync_start_epoch_s` after a successful run.
  *
- * Deliberately excludes §6.2.6 pending-settle churn — that's M3b scope.
+ * Implements both the per-fetch decision pass (§6.2 steps 4-5, via [SyncEngine]) and the
+ * §6.2.6 pending-settle churn pass (via [PendingSettle]) as two separate passes per account,
+ * the latter running only after the former's rows are persisted.
  */
 class SimpleFinSyncRunner(
     private val repo: LedgerRepository,
     private val api: SimpleFinApi,
 ) {
     /**
-     * Fetches [accessUrl] starting from [startEpochS], applies the resulting [SyncPlan] for
-     * every account, and returns the number of brand-new transactions inserted. A fetch
-     * failure is returned unchanged (preserving [SimpleFinHttpException]/IO/Cancellation) so
-     * the caller can classify it (Retry vs. Error); a persist failure is likewise returned as
-     * a failed [Result] rather than thrown, so a transient DB error becomes Retry, not a
-     * permanent Error.
+     * Fetches [accessUrl] starting from [startEpochS], applies the resulting [SyncPlan] and
+     * pending-settle reconciliation for every account, and returns a [SyncOutcome]. [syncEpochDay]
+     * is the caller's notion of "today" (injected, not read from the system clock here, to keep
+     * this class pure/testable) and drives pending-row staleness. A fetch failure is returned
+     * unchanged (preserving [SimpleFinHttpException]/IO/Cancellation) so the caller can classify
+     * it (Retry vs. Error); a persist failure is likewise returned as a failed [Result] rather
+     * than thrown, so a transient DB error becomes Retry, not a permanent Error.
      */
-    suspend fun sync(accessUrl: String, startEpochS: Long): Result<Int> {
+    suspend fun sync(accessUrl: String, startEpochS: Long, syncEpochDay: Long): Result<SyncOutcome> {
         val accountSet = api.fetch(accessUrl, startEpochS).getOrElse { return Result.failure(it) }
+        val fetchStartEpochDay = java.time.Instant.ofEpochSecond(startEpochS)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toLocalDate()
+            .toEpochDay()
 
         // The persist phase can throw on a transient DB error (SQLite locked / disk full).
         // Return it as a failed Result so the @LightJob classifies it as Retry rather than a
         // permanent Error; CancellationException must still propagate for structured concurrency.
         return try {
-            Result.success(applyAccounts(accountSet))
+            val insertedCount = applyAccounts(accountSet, fetchStartEpochDay, syncEpochDay)
+            Result.success(SyncOutcome(insertedCount, accountSet.errors))
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (t: Throwable) {
@@ -42,8 +70,9 @@ class SimpleFinSyncRunner(
         }
     }
 
-    /** Applies the per-account [SyncPlan]s and returns the count of brand-new inserts. */
-    private suspend fun applyAccounts(accountSet: AccountSet): Int {
+    /** Applies the per-account [SyncPlan] and pending-settle pass; returns the count of
+     * brand-new inserts across all accounts. */
+    private suspend fun applyAccounts(accountSet: AccountSet, fetchStartEpochDay: Long, syncEpochDay: Long): Int {
         var insertedCount = 0
         for (account in accountSet.accounts) {
             // Same dbId feeds the mapper's dedup-hash inputs AND the lookups below — the
@@ -56,34 +85,28 @@ class SimpleFinSyncRunner(
                 repo.findTransactionByExternal(dbId, txn.externalId)?.let { txn.externalId to it }
             }.toMap()
 
-            // M3a caveat: candidates are looked up by *exact* hash, and DedupHash.compute folds
-            // in this SIMPLEFIN account's local dbId — so a MANUAL/CSV row (hashed under its own
-            // account id) can never collide here. That makes SyncEngine's LinkCrossSource branch
-            // inert in production: M3a performs exact-day, same-account dedup only. True
-            // cross-source dedup (account-agnostic / adjacent-day probing) is deferred to M3b;
-            // SyncEngineTest exercises LinkCrossSource with a hand-injected candidate the real
-            // repo would not yet return, so that decision logic is unit-covered ahead of M3b.
-            //
-            // M3b/T5 note: SyncEngine.plan's dedupLookup signature changed to take the incoming
-            // MappedExternalTxn (account-agnostic lookup contract) so LedgerRepository can offer
-            // findCrossSourceDedupCandidates. This runner is NOT yet wired to that new query —
-            // that's M3b/T6 — so this lambda just recomputes the same account-scoped hash used to
-            // build byDedupHash below, keeping this call site's behavior byte-identical to before.
-            val byDedupHash: Map<String, List<TxnRef>> = mapped.associate { txn ->
-                val hash = DedupHash.compute(dbId, txn.postedEpochDay, txn.amountMinor, txn.payee)
-                hash to repo.findDedupCandidates(hash)
-            }
-
             val rules = repo.listRules()
+
+            // SyncEngine.plan's dedupLookup is a plain (non-suspend) function type, so the
+            // suspend repo call must happen out here, before plan() runs, and be handed to the
+            // lambda as a synchronous map lookup. Keyed by externalId (unique within one
+            // account's fetch) rather than the old exact dedup hash — this is the
+            // account-agnostic cross-source query: a MANUAL/CSV row for the same purchase,
+            // entered under a different account, is still a valid candidate. SyncEngine itself
+            // further filters by non-SIMPLEFIN source, day proximity, and normalized payee.
+            val crossSourceCandidatesByExternalId: Map<String, List<TxnRef>> = mapped.associate { txn ->
+                txn.externalId to repo.findCrossSourceDedupCandidates(
+                    txn.amountMinor,
+                    txn.postedEpochDay - CROSS_SOURCE_WINDOW_DAYS,
+                    txn.postedEpochDay + CROSS_SOURCE_WINDOW_DAYS,
+                )
+            }
 
             val plan = SyncEngine.plan(
                 accountId = dbId,
                 incoming = mapped,
                 externalLookup = { externalById[it] },
-                dedupLookup = { txn ->
-                    val hash = DedupHash.compute(dbId, txn.postedEpochDay, txn.amountMinor, txn.payee)
-                    byDedupHash[hash] ?: emptyList()
-                },
+                dedupLookup = { txn -> crossSourceCandidatesByExternalId[txn.externalId] ?: emptyList() },
                 rules = rules,
             )
 
@@ -116,12 +139,36 @@ class SimpleFinSyncRunner(
                     is SyncEngine.SyncOp.LinkCrossSource -> repo.adoptExternalId(op.existingId, op.externalId)
                 }
             }
+
+            // Pending-settle pass (§6.2.6) — a SEPARATE pass over already-persisted rows, run
+            // only after this account's fetch-decision ops above are applied. Banks commonly
+            // re-post a pending transaction under a brand-new external id once it settles; this
+            // reconciles the stale pending row against the new settled one so the ledger doesn't
+            // keep a visible duplicate or orphan the user's category on the pending row.
+            val fetchedExternalIds = mapped.map { it.externalId }.toSet()
+            val stale = repo.listStalePendingExternal(dbId, syncEpochDay - PENDING_AGE_DAYS)
+            val candidates = stale.flatMap { p ->
+                repo.findSettledMatches(
+                    dbId,
+                    p.amountMinor,
+                    p.postedEpochDay - PENDING_WINDOW_DAYS,
+                    p.postedEpochDay + PENDING_WINDOW_DAYS,
+                )
+            }.distinctBy { it.id }
+            val settleOps = PendingSettle.plan(stale, candidates, fetchedExternalIds, fetchStartEpochDay, syncEpochDay)
+
+            for (op in settleOps) {
+                when (op) {
+                    is SettleOp.MigrateThenDelete -> {
+                        repo.confirmReview(op.newId, op.categoryId)
+                        repo.deleteTransaction(op.oldId)
+                    }
+
+                    is SettleOp.DeleteStale -> repo.deleteTransaction(op.oldId)
+                }
+            }
         }
 
-        // accountSet.errors (subscription lapses / "reauthenticate", §6.1.4) are non-fatal per
-        // §6.2, so a non-empty list never fails the sync. Surfacing them to the user as a
-        // reconnect prompt is deferred to M3b — today they are decoded but intentionally not
-        // acted on, so a 200-with-errors syncs no new data without a visible warning.
         return insertedCount
     }
 }
