@@ -24,6 +24,9 @@ import kotlinx.coroutines.withContext
 
 enum class InputMode { NORMAL, CANDIDATE }
 
+/** Which edge the floating keypad docks to — the half of the board opposite the selected cell. */
+enum class KeypadDock { TOP, BOTTOM }
+
 /** Transient UI as synchronous state so onBackPressed() can answer "is something open?". */
 sealed interface Overlay {
     data object Menu : Overlay
@@ -354,6 +357,16 @@ class GameViewModel(
      * (selected resets to -1 in [open]).
      */
     fun shouldShowKeypad(): Boolean = canEdit(s.selected)
+
+    /**
+     * Which half of the board the floating keypad docks on: the half OPPOSITE the selected cell, so
+     * the selected cell (and the rows around it) stay visible while you enter a number. Low rows (5–8)
+     * dock the panel at the TOP; upper rows (0–4) dock it at the BOTTOM. [selected] == -1 returns
+     * BOTTOM deterministically (unused — the keypad is hidden with no selection). Pure so the UI can
+     * pass [GameUiState.selected] as a Compose state read (guaranteeing the panel repositions).
+     */
+    fun keypadDock(selected: Int): KeypadDock =
+        if (selected >= 0 && selected / 9 >= 5) KeypadDock.TOP else KeypadDock.BOTTOM
 
     private fun pushUndo(i: Int): List<UndoFrame> =
         (s.undo + UndoFrame(

@@ -531,7 +531,8 @@ class GameViewModelTest {
         assertTrue(vm.ui.value.values.all { it != 0 }, "board is completely full")
         vm.deselect()
         assertFalse(vm.shouldShowKeypad())
-        // the '▴ Keypad' handle must still open the keypad so the mistake can be fixed
+        // summonKeypad() must still open the keypad on an editable cell so the mistake can be fixed
+        // (retained as VM API though the UI now summons by tapping the cell directly).
         vm.summonKeypad()
         assertTrue(vm.shouldShowKeypad(), "summon opens the keypad even with no empty cell left")
         val sel = vm.ui.value.selected
@@ -562,5 +563,38 @@ class GameViewModelTest {
         val filled = (0 until 81).first { vm.ui.value.lockedMask[it] }
         assertEquals(filled, vm.ui.value.selected, "fill hint leaves the filled cell selected")
         assertFalse(vm.shouldShowKeypad(), "fill hint locks the cell -> keypad collapses to the big board")
+    }
+
+    // ---------- adaptive floating keypad: docks on the half OPPOSITE the selected cell ----------
+
+    @Test fun keypadDockTruthTableAcrossAllRows() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        for (i in 0..80) {
+            val expected = if (i / 9 >= 5) KeypadDock.TOP else KeypadDock.BOTTOM
+            assertEquals(expected, vm.keypadDock(i), "cell $i (row ${i / 9}) docks $expected")
+        }
+    }
+
+    @Test fun keypadDockBoundaryRows() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        assertEquals(KeypadDock.BOTTOM, vm.keypadDock(44), "row 4 (last upper) -> keypad at bottom")
+        assertEquals(KeypadDock.TOP, vm.keypadDock(45), "row 5 (first lower) -> keypad at top")
+    }
+
+    @Test fun keypadDockNoSelection() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        assertEquals(KeypadDock.BOTTOM, vm.keypadDock(-1), "no selection -> deterministic BOTTOM (unused; keypad hidden)")
+    }
+
+    @Test fun keypadDockKeepsSelectedCellVisible() = runTest {
+        val vm = vm(); advanceUntilIdle()
+        // Conservative covered bands (the true pixel band is AVD-verified): a TOP dock covers rows
+        // 0..3, a BOTTOM dock covers rows 5..8. The selected cell's row must never fall in the band
+        // its own dock covers. This catches a mis-set threshold, unlike a self-referential table.
+        for (i in 0..80) {
+            val row = i / 9
+            val covered = if (vm.keypadDock(i) == KeypadDock.TOP) 0..3 else 5..8
+            assertFalse(row in covered, "selected row $row must stay visible, not under the ${vm.keypadDock(i)} panel")
+        }
     }
 }
