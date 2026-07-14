@@ -151,4 +151,82 @@ class PendingSettleTest {
 
         assertEquals(emptyList(), ops)
     }
+
+    @Test fun windowBoundary_atWindow_migrates_beyondWindow_deletesStale() {
+        // windowDays defaults to 4: a settled row exactly 4 days out must still match (<=), but
+        // one 5 days out must not (no match -> DeleteStale, not MigrateThenDelete).
+        val pAtWindow = txn(id = 1, externalId = "OLD-A", status = TransactionStatus.CONFIRMED, categoryId = 7L)
+        val sAtWindow = txn(id = 2, postedEpochDay = AGED_POSTED_DAY + 4, externalId = "NEW-A")
+        val opsAtWindow = plan(pending = listOf(pAtWindow), settledCandidates = listOf(sAtWindow))
+        assertEquals(listOf(SettleOp.MigrateThenDelete(oldId = 1L, newId = 2L, categoryId = 7L)), opsAtWindow)
+
+        val pBeyondWindow = txn(id = 3, externalId = "OLD-B", status = TransactionStatus.CONFIRMED, categoryId = 7L)
+        val sBeyondWindow = txn(id = 4, postedEpochDay = AGED_POSTED_DAY + 5, externalId = "NEW-B")
+        val opsBeyondWindow = plan(pending = listOf(pBeyondWindow), settledCandidates = listOf(sBeyondWindow))
+        assertEquals(listOf(SettleOp.DeleteStale(oldId = 3L)), opsBeyondWindow)
+    }
+
+    @Test fun matchTieBreak_prefersNearerDate_evenWhenHigherId() {
+        // The nearer candidate carries the HIGHER id: the tie-break must sort by (distance, id),
+        // not (id, distance), or this would wrongly pick the farther-but-lower-id candidate.
+        val p = txn(id = 1, externalId = "OLD", status = TransactionStatus.CONFIRMED, categoryId = 9L)
+        val sNear = txn(id = 20, postedEpochDay = AGED_POSTED_DAY + 1, externalId = "NEW-NEAR")
+        val sFar = txn(id = 5, postedEpochDay = AGED_POSTED_DAY + 3, externalId = "NEW-FAR")
+
+        val ops = plan(pending = listOf(p), settledCandidates = listOf(sFar, sNear))
+
+        assertEquals(listOf(SettleOp.MigrateThenDelete(oldId = 1L, newId = 20L, categoryId = 9L)), ops)
+    }
+
+    @Test fun uncategorizedPendingDoesNotConsumeCandidateForLaterCategorizedPending() {
+        // pA (lower id, processed first) is uncategorized/not-confirmed and only ever produces
+        // DeleteStale. The one settled candidate must remain in the pool for pB (higher id,
+        // processed second) to migrate onto -- a candidate may only be consumed by an actual
+        // MigrateThenDelete, never by a DeleteStale that merely happened to find a match.
+        val pA = txn(id = 2, externalId = "OLD-A", status = TransactionStatus.NEEDS_REVIEW, categoryId = null, amountMinor = -700L)
+        val pB = txn(id = 5, externalId = "OLD-B", status = TransactionStatus.CONFIRMED, categoryId = 4L, amountMinor = -700L)
+        val s = txn(id = 99, externalId = "NEW", amountMinor = -700L)
+
+        val ops = plan(pending = listOf(pA, pB), settledCandidates = listOf(s))
+
+        assertEquals(
+            listOf(
+                SettleOp.DeleteStale(oldId = 2L),
+                SettleOp.MigrateThenDelete(oldId = 5L, newId = 99L, categoryId = 4L),
+            ),
+            ops,
+        )
+    }
+
+    @Test fun agedBoundary_exactlyAtThreshold_isIncluded() {
+        // postedEpochDay == syncEpochDay - ageDays must be included: aged uses <=, not <.
+        val thresholdDay = SYNC_EPOCH_DAY - 5L // 19995
+        val p = txn(id = 1, postedEpochDay = thresholdDay, externalId = "OLD", status = TransactionStatus.CONFIRMED, categoryId = 7L)
+        val s = txn(id = 2, postedEpochDay = thresholdDay, externalId = "NEW")
+
+        val ops = plan(pending = listOf(p), settledCandidates = listOf(s))
+
+        assertEquals(listOf(SettleOp.MigrateThenDelete(oldId = 1L, newId = 2L, categoryId = 7L)), ops)
+    }
+
+    @Test fun fetchCoveredBoundary_exactlyAtStart_isIncluded() {
+        // postedEpochDay == fetchStartEpochDay must be included: fetch-covered uses >=, not >.
+        val p = txn(id = 1, postedEpochDay = FETCH_START_EPOCH_DAY, externalId = "OLD", status = TransactionStatus.CONFIRMED, categoryId = 7L)
+        val s = txn(id = 2, postedEpochDay = FETCH_START_EPOCH_DAY, externalId = "NEW")
+
+        val ops = plan(pending = listOf(p), settledCandidates = listOf(s))
+
+        assertEquals(listOf(SettleOp.MigrateThenDelete(oldId = 1L, newId = 2L, categoryId = 7L)), ops)
+    }
+
+    @Test fun pendingOwnIdInCandidatePool_isNotSelfMatched() {
+        // A candidate sharing the pending row's own id must be excluded by `s.id != p.id`, even
+        // though its amount/date otherwise match exactly, and even with no other candidate around.
+        val p = txn(id = 1, externalId = "OLD", status = TransactionStatus.CONFIRMED, categoryId = 7L)
+        val self = txn(id = 1, externalId = "SELF-ECHO")
+
+        val ops = plan(pending = listOf(p), settledCandidates = listOf(self))
+
+        assertEquals(listOf(SettleOp.DeleteStale(oldId = 1L)), ops)
+    }
 }
