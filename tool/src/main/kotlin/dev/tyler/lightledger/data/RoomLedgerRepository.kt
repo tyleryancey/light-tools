@@ -249,6 +249,14 @@ class RoomLedgerRepository private constructor(
         transactionDao.findSettledMatchRows(accountId, amountMinor, minEpochDay, maxEpochDay).map { it.toTxnRef() }
     }
 
+    override suspend fun findCrossSourceDedupCandidates(
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TxnRef> = withContext(Dispatchers.IO) {
+        transactionDao.findCrossSourceCandidateRows(amountMinor, minEpochDay, maxEpochDay).map { it.toTxnRef() }
+    }
+
     companion object {
         const val DATABASE_NAME = "ledger.db"
         private const val DEFAULT_CURRENCY = "USD"

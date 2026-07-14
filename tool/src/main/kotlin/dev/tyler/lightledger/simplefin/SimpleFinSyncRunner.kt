@@ -63,6 +63,12 @@ class SimpleFinSyncRunner(
             // cross-source dedup (account-agnostic / adjacent-day probing) is deferred to M3b;
             // SyncEngineTest exercises LinkCrossSource with a hand-injected candidate the real
             // repo would not yet return, so that decision logic is unit-covered ahead of M3b.
+            //
+            // M3b/T5 note: SyncEngine.plan's dedupLookup signature changed to take the incoming
+            // MappedExternalTxn (account-agnostic lookup contract) so LedgerRepository can offer
+            // findCrossSourceDedupCandidates. This runner is NOT yet wired to that new query —
+            // that's M3b/T6 — so this lambda just recomputes the same account-scoped hash used to
+            // build byDedupHash below, keeping this call site's behavior byte-identical to before.
             val byDedupHash: Map<String, List<TxnRef>> = mapped.associate { txn ->
                 val hash = DedupHash.compute(dbId, txn.postedEpochDay, txn.amountMinor, txn.payee)
                 hash to repo.findDedupCandidates(hash)
@@ -74,7 +80,10 @@ class SimpleFinSyncRunner(
                 accountId = dbId,
                 incoming = mapped,
                 externalLookup = { externalById[it] },
-                dedupLookup = { byDedupHash[it] ?: emptyList() },
+                dedupLookup = { txn ->
+                    val hash = DedupHash.compute(dbId, txn.postedEpochDay, txn.amountMinor, txn.payee)
+                    byDedupHash[hash] ?: emptyList()
+                },
                 rules = rules,
             )
 

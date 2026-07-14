@@ -301,6 +301,19 @@ class FakeLedgerRepository : LedgerRepository {
             it.postedEpochDay in minEpochDay..maxEpochDay
     }.map { it.toTxnRef() }
 
+    // Mirrors TransactionDao.findCrossSourceCandidateRows' "source != 'SIMPLEFIN' AND
+    // amountMinor = :amountMinor AND postedEpochDay BETWEEN :minEpochDay AND :maxEpochDay"
+    // (account-agnostic — no accountId filter, unlike findSettledMatches above).
+    override suspend fun findCrossSourceDedupCandidates(
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TxnRef> = transactions.filter {
+        it.source != TransactionSource.SIMPLEFIN &&
+            it.amountMinor == amountMinor &&
+            it.postedEpochDay in minEpochDay..maxEpochDay
+    }.map { it.toTxnRef() }
+
     private fun FakeTxn.toTransaction() = Transaction(
         id = id,
         accountId = accountId,

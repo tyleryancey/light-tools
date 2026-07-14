@@ -13,7 +13,7 @@ private const val ACCOUNT_ID = 1L
 
 class SyncEngineTest {
     private val noExternal: (String) -> TxnRef? = { null }
-    private val noDedup: (String) -> List<TxnRef> = { emptyList() }
+    private val noDedup: (MappedExternalTxn) -> List<TxnRef> = { emptyList() }
     private val noRules = emptyList<CategoryRule>()
 
     private fun mapped(
@@ -72,7 +72,6 @@ class SyncEngineTest {
             pendingExternal = false,
         )
         val externalLookup: (String) -> TxnRef? = { id -> if (id == "TRN-9") existing else null }
-        val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)
         // A row distinct from `existing` that WOULD independently qualify as a cross-source
         // LinkCrossSource candidate: different id, non-SimpleFIN source, and within the 1-day
         // window. This proves rule 1 (external match) is checked before rule 2 (cross-source
@@ -91,8 +90,7 @@ class SyncEngineTest {
             payee = txn.payee,
             pendingExternal = false,
         )
-        val dedupLookup: (String) -> List<TxnRef> =
-            { hash -> if (hash == dedupHash) listOf(crossSourceCandidate) else emptyList() }
+        val dedupLookup: (MappedExternalTxn) -> List<TxnRef> = { listOf(crossSourceCandidate) }
         val rules = listOf(
             CategoryRule(id = 1L, payeeContains = "coffee", categoryId = 42L, enabled = true),
         )
@@ -110,14 +108,12 @@ class SyncEngineTest {
         // postedEpochDay, pendingExternal) only, so category/status can never be touched here.
     }
 
-    // Covers SyncEngine's LinkCrossSource *decision* logic. Note the injected candidate is a
-    // MANUAL row keyed under the SIMPLEFIN-computed dedupHash — a pairing the M3a runner never
-    // actually produces (DedupHash folds in the local account id, so cross-account hashes differ;
-    // see SimpleFinSyncRunner.applyAccounts). So this locks the decision ahead of M3b, when true
-    // account-agnostic cross-source lookup will make the branch reachable in production.
+    // Covers SyncEngine's LinkCrossSource *decision* logic. dedupLookup is now account-agnostic
+    // (keyed on the incoming MappedExternalTxn, not a pre-computed hash) — this is the M3b shape
+    // that makes the real repo query (LedgerRepository.findCrossSourceDedupCandidates) reachable
+    // in production, unlike the M3a exact-hash form this test previously exercised.
     @Test fun crossSourceDedupWithinOneDayLinksToExistingManualRow() {
         val txn = mapped(externalId = "TRN-5", postedEpochDay = 19000L, amountMinor = -450L, payee = "Coffee Shop")
-        val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)
         val manualRow = TxnRef(
             id = 30L,
             accountId = ACCOUNT_ID,
@@ -130,7 +126,7 @@ class SyncEngineTest {
             payee = "Coffee Shop",
             pendingExternal = false,
         )
-        val dedupLookup: (String) -> List<TxnRef> = { hash -> if (hash == dedupHash) listOf(manualRow) else emptyList() }
+        val dedupLookup: (MappedExternalTxn) -> List<TxnRef> = { listOf(manualRow) }
 
         val plan = SyncEngine.plan(ACCOUNT_ID, listOf(txn), noExternal, dedupLookup, noRules)
 
@@ -139,9 +135,32 @@ class SyncEngineTest {
         assertEquals("TRN-5", op.externalId)
     }
 
+    @Test fun sameAmountAndDayButDifferentNormalizedPayeeInsertsInsteadOfLinking() {
+        val txn = mapped(externalId = "TRN-10", postedEpochDay = 19000L, amountMinor = -450L, payee = "Shell Gas")
+        // Same amount + same day as the incoming txn, but a genuinely different normalized payee
+        // (not merely a case/whitespace/trailing-digit variant) — the payee-equality check added
+        // in M3b/T5 must reject this candidate even though amount+day alone would have matched.
+        val differentPayeeRow = TxnRef(
+            id = 40L,
+            accountId = ACCOUNT_ID,
+            source = TransactionSource.MANUAL,
+            status = TransactionStatus.CONFIRMED,
+            categoryId = 7L,
+            externalId = null,
+            postedEpochDay = 19000L,
+            amountMinor = -450L,
+            payee = "Whole Foods",
+            pendingExternal = false,
+        )
+        val dedupLookup: (MappedExternalTxn) -> List<TxnRef> = { listOf(differentPayeeRow) }
+
+        val plan = SyncEngine.plan(ACCOUNT_ID, listOf(txn), noExternal, dedupLookup, noRules)
+
+        assertIs<SyncEngine.SyncOp.Insert>(plan.ops.single())
+    }
+
     @Test fun sameDedupHashButMoreThanOneDayApartInsertsInsteadOfLinking() {
         val txn = mapped(externalId = "TRN-6", postedEpochDay = 19000L, amountMinor = -450L, payee = "Coffee Shop")
-        val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)
         val manualRow = TxnRef(
             id = 31L,
             accountId = ACCOUNT_ID,
@@ -154,7 +173,7 @@ class SyncEngineTest {
             payee = "Coffee Shop",
             pendingExternal = false,
         )
-        val dedupLookup: (String) -> List<TxnRef> = { hash -> if (hash == dedupHash) listOf(manualRow) else emptyList() }
+        val dedupLookup: (MappedExternalTxn) -> List<TxnRef> = { listOf(manualRow) }
 
         val plan = SyncEngine.plan(ACCOUNT_ID, listOf(txn), noExternal, dedupLookup, noRules)
 
@@ -163,7 +182,6 @@ class SyncEngineTest {
 
     @Test fun dedupCandidateFromSimpleFinSourceIsNotCrossSourceLinked() {
         val txn = mapped(externalId = "TRN-7", postedEpochDay = 19000L, amountMinor = -450L, payee = "Coffee Shop")
-        val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)
         val simplefinRow = TxnRef(
             id = 32L,
             accountId = ACCOUNT_ID,
@@ -176,7 +194,7 @@ class SyncEngineTest {
             payee = "Coffee Shop",
             pendingExternal = false,
         )
-        val dedupLookup: (String) -> List<TxnRef> = { hash -> if (hash == dedupHash) listOf(simplefinRow) else emptyList() }
+        val dedupLookup: (MappedExternalTxn) -> List<TxnRef> = { listOf(simplefinRow) }
 
         val plan = SyncEngine.plan(ACCOUNT_ID, listOf(txn), noExternal, dedupLookup, noRules)
 
@@ -186,7 +204,6 @@ class SyncEngineTest {
 
     @Test fun multipleCrossSourceCandidatesPicksClosestByDateThenLowestId() {
         val txn = mapped(externalId = "TRN-8", postedEpochDay = 19000L, amountMinor = -450L, payee = "Coffee Shop")
-        val dedupHash = DedupHash.compute(ACCOUNT_ID, txn.postedEpochDay, txn.amountMinor, txn.payee)
         // Both candidates are equally close (1 day away) but on opposite sides of the incoming
         // date, so the date-distance comparator alone ties them; only the id tie-break decides.
         val higherId = TxnRef(
@@ -214,8 +231,7 @@ class SyncEngineTest {
             pendingExternal = false,
         )
         // Listed with the higher id first so a naive "first match wins" implementation would fail.
-        val dedupLookup: (String) -> List<TxnRef> =
-            { hash -> if (hash == dedupHash) listOf(higherId, lowerId) else emptyList() }
+        val dedupLookup: (MappedExternalTxn) -> List<TxnRef> = { listOf(higherId, lowerId) }
 
         val plan = SyncEngine.plan(ACCOUNT_ID, listOf(txn), noExternal, dedupLookup, noRules)
 

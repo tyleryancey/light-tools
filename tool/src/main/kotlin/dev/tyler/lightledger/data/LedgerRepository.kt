@@ -89,4 +89,15 @@ interface LedgerRepository {
         minEpochDay: Long,
         maxEpochDay: Long,
     ): List<TxnRef>
+
+    /**
+     * Account-agnostic cross-source dedup candidates: non-SIMPLEFIN rows (MANUAL/CSV) matching
+     * [amountMinor] and posted within [minEpochDay]..[maxEpochDay], regardless of account. Feeds
+     * [dev.tyler.lightledger.simplefin.SyncEngine.plan]'s `dedupLookup` input.
+     */
+    suspend fun findCrossSourceDedupCandidates(
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TxnRef>
 }

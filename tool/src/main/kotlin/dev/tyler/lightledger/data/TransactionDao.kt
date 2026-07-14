@@ -95,6 +95,21 @@ internal interface TransactionDao {
         minEpochDay: Long,
         maxEpochDay: Long,
     ): List<TransactionEntity>
+
+    /**
+     * Account-agnostic cross-source dedup candidates: any non-SIMPLEFIN row (MANUAL/CSV) matching
+     * amount and within a posted-day window, regardless of which account it lives on. Excludes
+     * SIMPLEFIN rows so a bank import never cross-links against another bank import.
+     */
+    @Query(
+        "SELECT * FROM transactions WHERE source != 'SIMPLEFIN' " +
+            "AND amountMinor = :amountMinor AND postedEpochDay BETWEEN :minEpochDay AND :maxEpochDay",
+    )
+    fun findCrossSourceCandidateRows(
+        amountMinor: Long,
+        minEpochDay: Long,
+        maxEpochDay: Long,
+    ): List<TransactionEntity>
 }
 
 /** Narrow projection for [TransactionDao.listConfirmedPayeeCategory]; not exposed outside the data layer. */

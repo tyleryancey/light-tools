@@ -55,7 +55,7 @@ object SyncEngine {
         accountId: Long,
         incoming: List<MappedExternalTxn>,
         externalLookup: (externalId: String) -> TxnRef?,
-        dedupLookup: (dedupHash: String) -> List<TxnRef>,
+        dedupLookup: (txn: MappedExternalTxn) -> List<TxnRef>,
         rules: List<CategoryRule>,
     ): SyncPlan {
         val ops = incoming.map { txn ->
@@ -70,11 +70,16 @@ object SyncEngine {
                 )
             }
 
+            // Stored hash stays account-scoped (persisted on Insert below) — only the
+            // *lookup* is account-agnostic, via dedupLookup(txn) below.
             val dedupHash = DedupHash.compute(accountId, txn.postedEpochDay, txn.amountMinor, txn.payee)
 
-            val crossSourceMatch = dedupLookup(dedupHash)
+            val crossSourceMatch = dedupLookup(txn)
                 .filter { it.source != TransactionSource.SIMPLEFIN }
                 .filter { abs(it.postedEpochDay - txn.postedEpochDay) <= CROSS_SOURCE_WINDOW_DAYS }
+                // The lookup is now amount+day only (account-agnostic), so a hash match no
+                // longer implies identical normalized payee — re-check it explicitly.
+                .filter { DedupHash.normalizePayee(it.payee) == DedupHash.normalizePayee(txn.payee) }
                 .minWithOrNull(
                     compareBy(
                         { abs(it.postedEpochDay - txn.postedEpochDay) },

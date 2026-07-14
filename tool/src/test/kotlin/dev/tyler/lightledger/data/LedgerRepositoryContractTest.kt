@@ -1,5 +1,6 @@
 package dev.tyler.lightledger.data
 
+import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -365,5 +366,37 @@ class LedgerRepositoryContractTest {
         assertNull(repo.getTransaction(pendingId))
         assertTrue(repo.listStalePendingExternal(accountId, day - 5).isEmpty())
         assertNotNull(repo.getTransaction(settledId))
+    }
+
+    @Test fun findCrossSourceDedupCandidatesReturnsNonSimpleFinRowsAccountAgnostic() = runTest {
+        val repo = FakeLedgerRepository()
+        repo.ensureSeeded()
+        val category = repo.listCategories().first()
+        // addManualTransaction always posts "today" (no postedEpochDay param), so the window
+        // below is built around that same day rather than an arbitrary constant.
+        val day = LocalDate.now().toEpochDay()
+        val amount = -450L
+
+        val manualId = repo.addManualTransaction(amountMinor = amount, payee = "Coffee Shop", categoryId = category.id)
+
+        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        val simplefinId = repo.insertExternalTransaction(
+            accountId = accountId,
+            postedEpochDay = day,
+            amountMinor = amount,
+            payee = "Coffee Shop",
+            memo = "",
+            categoryId = null,
+            status = TransactionStatus.NEEDS_REVIEW,
+            externalId = "txn-1",
+            pendingExternal = false,
+            dedupHash = "hash-1",
+        )
+
+        val candidates = repo.findCrossSourceDedupCandidates(amount, day - 1, day + 1)
+
+        assertEquals(1, candidates.size)
+        assertEquals(manualId, candidates.first().id)
+        assertTrue(candidates.none { it.id == simplefinId })
     }
 }
