@@ -112,6 +112,24 @@ private val FIXTURE_REAL_WORLD_ACCOUNTS = """
 }
 """.trimIndent()
 
+// A JPY (zero-decimal) account, exercising CurrencyExponent threading through the mapper:
+// "-1200" must map to amountMinor = -1200 (exponent 0), not -120000 (the USD/2dp default).
+private val FIXTURE_JPY_ACCOUNT = """
+{
+  "errors": [],
+  "accounts": [
+    {
+      "id": "ACT-JPY1",
+      "name": "Yen Checking",
+      "currency": "JPY",
+      "transactions": [
+        {"id": "TRN-JPY1", "posted": 1751846400, "amount": "-1200", "description": "KONBINI"}
+      ]
+    }
+  ]
+}
+""".trimIndent()
+
 class SimpleFinDecodeTest {
 
     @Test
@@ -237,6 +255,16 @@ class SimpleFinDecodeTest {
         assertEquals("Coffee Shop Co", txn.payee)
         assertEquals("latte", txn.memo)
         assertFalse(txn.pending)
+    }
+
+    @Test
+    fun mapsZeroDecimalCurrencyAmountWithoutScaling() {
+        val account = SimpleFinDecoder.decode(FIXTURE_JPY_ACCOUNT).accounts.single()
+        assertEquals("JPY", account.currency)
+        val mapped = SimpleFinMapper.toMappedTransactions(account)
+        val txn = mapped.single()
+        // JPY has 0 decimal places, so "-1200" maps to -1200 minor units, not -120000.
+        assertEquals(-1200L, txn.amountMinor)
     }
 
     @Test
