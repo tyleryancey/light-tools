@@ -112,14 +112,23 @@ class FakeLedgerRepository : LedgerRepository {
         val range = LedgerMath.epochDayRange(month)
         val inRange = transactions.filter { it.status == TransactionStatus.CONFIRMED && it.postedEpochDay in range }
         return LedgerMath.categoryTotals(
+            // Mirrors the Room DAO's JOIN accounts ON t.accountId = a.id: a row whose account no
+            // longer exists is dropped (INNER JOIN semantics), and the currency always comes from
+            // the account, never a hard-coded default.
             inRange.mapNotNull { txn ->
                 val categoryId = txn.categoryId ?: return@mapNotNull null
-                TransactionAmount(categoryId = categoryId, currency = "USD", amountMinor = txn.amountMinor)
+                val currency = accounts.firstOrNull { it.id == txn.accountId }?.currency ?: return@mapNotNull null
+                TransactionAmount(categoryId = categoryId, currency = currency, amountMinor = txn.amountMinor)
             },
         ).mapNotNull { total ->
             val categoryId = total.categoryId ?: return@mapNotNull null
             val name = categories.firstOrNull { it.id == categoryId }?.name ?: return@mapNotNull null
-            CategoryMonthTotal(categoryId = categoryId, categoryName = name, totalMinor = total.totalMinor)
+            CategoryMonthTotal(
+                categoryId = categoryId,
+                categoryName = name,
+                totalMinor = total.totalMinor,
+                currency = total.currency,
+            )
         }
     }
 

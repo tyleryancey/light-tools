@@ -35,9 +35,11 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
+import dev.tyler.lightledger.data.CategoryMonthTotal
 import dev.tyler.lightledger.data.LedgerDatabase
 import dev.tyler.lightledger.data.RoomLedgerRepository
 import dev.tyler.lightledger.data.SIMPLEFIN_SYNC_JOB_KEY
+import dev.tyler.lightledger.domain.LedgerMath
 import dev.tyler.lightledger.ui.addentry.AddEntryScreen
 import dev.tyler.lightledger.ui.history.HistoryScreen
 import dev.tyler.lightledger.ui.review.ReviewScreen
@@ -111,7 +113,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
                 )
 
                 LightText(
-                    text = formatAmount(totalSpentMinor(state.categoryTotals)) + " spent",
+                    text = primaryTotalText(state.categoryTotals) + " spent",
                     variant = LightTextVariant.Title,
                     align = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 0.5f.gridUnitsAsDp()),
@@ -166,7 +168,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
                     ) {
                         state.categoryTotals.forEach { total ->
                             LightText(
-                                text = "${total.categoryName}  ${formatAmount(total.totalMinor)}",
+                                text = "${total.categoryName}  ${formatAmount(total.totalMinor, total.currency)}",
                                 variant = LightTextVariant.Copy,
                                 modifier = Modifier.padding(vertical = 0.5f.gridUnitsAsDp()),
                             )
@@ -201,7 +203,20 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
 
 private fun monthTitle(month: YearMonth): String = month.month.name.take(3) + " " + month.year
 
-private fun formatAmount(amountMinor: Long): String {
+// M3b-features: per-currency lines — when spend spans more than one currency, Home still shows
+// only the primary (largest-absolute-spend) currency's total; per-currency breakdown rows are
+// deferred. LedgerMath.primaryCurrencyTotal is the never-sum-across-currencies guard.
+private fun primaryTotalText(totals: List<CategoryMonthTotal>): String {
+    val (currency, spendMinor) = LedgerMath.primaryCurrencyTotal(totals) ?: ("USD" to 0L)
+    return formatAmount(spendMinor, currency)
+}
+
+private fun formatAmount(amountMinor: Long, currencyCode: String): String {
     val format = java.text.NumberFormat.getCurrencyInstance(Locale.US)
+    try {
+        format.currency = java.util.Currency.getInstance(currencyCode)
+    } catch (e: IllegalArgumentException) {
+        // Unknown/invalid ISO 4217 code — fall back to the default USD-formatted instance.
+    }
     return format.format(amountMinor / 100.0)
 }

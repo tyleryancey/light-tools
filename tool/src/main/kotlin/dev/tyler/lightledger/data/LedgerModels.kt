@@ -12,7 +12,12 @@ data class Transaction(
     val categoryId: Long?,
 )
 
-data class CategoryMonthTotal(val categoryId: Long, val categoryName: String, val totalMinor: Long)
+data class CategoryMonthTotal(
+    val categoryId: Long,
+    val categoryName: String,
+    val totalMinor: Long,
+    val currency: String,
+)
 
 /** A single row in the review inbox (NEEDS_REVIEW transaction + its account's display name). */
 data class ReviewItem(

@@ -69,7 +69,21 @@ internal interface TransactionDao {
 
     @Query("DELETE FROM transactions WHERE accountId IN (SELECT id FROM accounts WHERE kind = 'SIMPLEFIN')")
     fun deleteBySimpleFinAccounts(): Int
+
+    @Query(
+        "SELECT t.categoryId AS categoryId, t.amountMinor AS amountMinor, a.currency AS currency " +
+            "FROM transactions t JOIN accounts a ON t.accountId = a.id " +
+            "WHERE t.status = 'CONFIRMED' AND t.postedEpochDay BETWEEN :startEpochDay AND :endEpochDay",
+    )
+    fun listConfirmedAmountsInRange(startEpochDay: Long, endEpochDay: Long): List<CategoryAmountRow>
 }
 
 /** Narrow projection for [TransactionDao.listConfirmedPayeeCategory]; not exposed outside the data layer. */
 internal data class PayeeCategoryRow(val payee: String, val categoryId: Long)
+
+/**
+ * Narrow projection for [TransactionDao.listConfirmedAmountsInRange] — joins the account's real
+ * currency so [RoomLedgerRepository.monthSummary] never hard-codes USD onto a non-USD account's
+ * transactions. Not exposed outside the data layer.
+ */
+internal data class CategoryAmountRow(val categoryId: Long?, val amountMinor: Long, val currency: String)

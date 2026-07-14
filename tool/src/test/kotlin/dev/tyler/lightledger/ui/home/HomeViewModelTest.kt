@@ -7,8 +7,11 @@ import androidx.datastore.preferences.core.edit
 import dev.tyler.lightledger.data.CategoryMonthTotal
 import dev.tyler.lightledger.data.FakeLedgerRepository
 import dev.tyler.lightledger.data.LedgerPreferences
+import dev.tyler.lightledger.data.TransactionStatus
+import dev.tyler.lightledger.domain.LedgerMath
 import java.io.File
 import java.nio.file.Files
+import java.time.LocalDate
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -80,10 +83,42 @@ class HomeViewModelTest {
 
     @Test fun totalSpentMinorSumsOnlyNegativeAmounts() {
         val totals = listOf(
-            CategoryMonthTotal(1L, "Groceries", -1200L),
-            CategoryMonthTotal(2L, "Income", 5000L),
+            CategoryMonthTotal(1L, "Groceries", -1200L, "USD"),
+            CategoryMonthTotal(2L, "Income", 5000L, "USD"),
         )
         assertEquals(1200L, totalSpentMinor(totals))
+    }
+
+    @Test fun mixedCurrencyMonthSummaryExposesOnlyPrimaryCurrencySpend() = runTest {
+        val repository = FakeLedgerRepository()
+        val vm = HomeViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        val groceries = repository.listCategories().first { it.name == "Groceries" }
+        // USD spend via the seeded manual (Cash) account.
+        repository.addManualTransaction(amountMinor = -5000L, payee = "Market", categoryId = groceries.id)
+        // A second, non-USD account whose spend must never be summed into the USD total.
+        val jpyAccountId = repository.upsertSimpleFinAccount(externalId = "jpy-acct", name = "JPY Account", currency = "JPY")
+        repository.insertExternalTransaction(
+            accountId = jpyAccountId,
+            postedEpochDay = LocalDate.now().toEpochDay(),
+            amountMinor = -9000L,
+            payee = "Tokyo Store",
+            memo = "",
+            categoryId = groceries.id,
+            status = TransactionStatus.CONFIRMED,
+            externalId = "jpy-txn-1",
+            pendingExternal = false,
+            dedupHash = "jpy-dedup-1",
+        )
+        vm.reload()
+        advanceUntilIdle()
+
+        val totals = vm.uiState.value.categoryTotals
+        val primary = LedgerMath.primaryCurrencyTotal(totals)
+        // JPY's 9000 minor-unit spend outweighs USD's 5000, so JPY is the primary currency and
+        // the displayed total must equal only its spend — never a cross-currency sum (14000).
+        assertEquals("JPY" to 9000L, primary)
     }
 
     @Test fun opportunisticSyncNotDueWithoutBlob() = runTest {
