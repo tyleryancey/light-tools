@@ -18,6 +18,7 @@ data class SettingsUiState(
     val connected: Boolean = false,
     val accountNames: List<String> = emptyList(),
     val loading: Boolean = true,
+    val bridgeError: String? = null,
 )
 
 /**
@@ -48,13 +49,20 @@ class SettingsViewModel(
 
     fun reload() {
         viewModelScope.launch {
-            val connected = dataStore.data.first()[LedgerPreferences.ACCESS_BLOB] != null
+            val prefs = dataStore.data.first()
+            val connected = prefs[LedgerPreferences.ACCESS_BLOB] != null
             val accountNames = repository.listSimpleFinAccounts()
-            _uiState.value = SettingsUiState(connected = connected, accountNames = accountNames, loading = false)
+            val bridgeError = prefs[LedgerPreferences.LAST_ERROR]
+            _uiState.value = SettingsUiState(
+                connected = connected,
+                accountNames = accountNames,
+                loading = false,
+                bridgeError = bridgeError,
+            )
         }
     }
 
-    /** Clears the encrypted blob + sync watermarks and deletes all SIMPLEFIN accounts/
+    /** Clears the encrypted blob + sync watermarks/error and deletes all SIMPLEFIN accounts/
      * transactions, then reflects the not-connected state in [uiState]. */
     fun disconnect() {
         viewModelScope.launch {
@@ -62,9 +70,10 @@ class SettingsViewModel(
                 prefs.remove(LedgerPreferences.ACCESS_BLOB)
                 prefs.remove(LedgerPreferences.LAST_SYNC_EPOCH_MS)
                 prefs.remove(LedgerPreferences.SYNC_START_EPOCH_S)
+                prefs.remove(LedgerPreferences.LAST_ERROR)
             }
             repository.deleteSimpleFinData()
-            _uiState.value = SettingsUiState(connected = false, accountNames = emptyList(), loading = false)
+            _uiState.value = SettingsUiState(connected = false, accountNames = emptyList(), loading = false, bridgeError = null)
         }
     }
 }

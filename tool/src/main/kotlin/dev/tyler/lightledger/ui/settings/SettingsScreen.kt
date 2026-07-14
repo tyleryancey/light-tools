@@ -128,6 +128,7 @@ class SettingsScreen(
                         state.connected -> ConnectedSimpleFinSection(
                             accountNames = state.accountNames,
                             statusText = syncStatusText,
+                            bridgeError = state.bridgeError,
                             onSyncNow = { LightWork.enqueue(lightContext, SIMPLEFIN_SYNC_JOB_KEY) },
                             onDisconnect = {
                                 LightWork.cancel(lightContext, SIMPLEFIN_SYNC_JOB_KEY)
@@ -161,6 +162,7 @@ class SettingsScreen(
 private fun ConnectedSimpleFinSection(
     accountNames: List<String>,
     statusText: String?,
+    bridgeError: String?,
     onSyncNow: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
@@ -183,6 +185,19 @@ private fun ConnectedSimpleFinSection(
     }
 
     statusText?.let {
+        LightText(
+            text = it,
+            variant = LightTextVariant.Detail,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.25f.gridUnitsAsDp()),
+        )
+    }
+
+    // Durable "Bridge says: …"/reconnect banner (LedgerJobs.kt LAST_ERROR) — persists across
+    // screen visits until the next clean sync or a disconnect, unlike the transient
+    // `statusText` above which only reflects the currently-observed job run.
+    bridgeError?.let {
         LightText(
             text = it,
             variant = LightTextVariant.Detail,

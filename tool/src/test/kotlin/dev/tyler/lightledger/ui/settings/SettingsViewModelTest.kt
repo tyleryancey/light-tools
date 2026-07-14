@@ -106,4 +106,47 @@ class SettingsViewModelTest {
         assertNull(prefs[LedgerPreferences.LAST_SYNC_EPOCH_MS])
         assertNull(prefs[LedgerPreferences.SYNC_START_EPOCH_S])
     }
+
+    @Test
+    fun reloadSurfacesSeededBridgeError() = runTest {
+        val repository = FakeLedgerRepository()
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.LAST_ERROR] = "Bridge says: reauthenticate at bank."
+        }
+
+        val vm = SettingsViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        assertEquals("Bridge says: reauthenticate at bank.", vm.uiState.value.bridgeError)
+    }
+
+    @Test
+    fun noBridgeErrorKeyLeavesBridgeErrorNull() = runTest {
+        val repository = FakeLedgerRepository()
+        val vm = SettingsViewModel(repository, dataStore)
+
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.bridgeError)
+    }
+
+    @Test
+    fun disconnectClearsBridgeError() = runTest {
+        val repository = FakeLedgerRepository()
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.LAST_ERROR] = "Connection expired — reconnect."
+        }
+        val vm = SettingsViewModel(repository, dataStore)
+        advanceUntilIdle()
+        assertEquals("Connection expired — reconnect.", vm.uiState.value.bridgeError)
+
+        vm.disconnect()
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.bridgeError)
+        val prefs = dataStore.data.first()
+        assertNull(prefs[LedgerPreferences.LAST_ERROR])
+    }
 }

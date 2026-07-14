@@ -52,6 +52,11 @@ val simpleFinSyncJob: LightJobHandler = { ctx, _ ->
         }
 
         if (accessUrl == null) {
+            // A rotated Keystore key can't be recovered from; persist a calm, credential-free
+            // reconnect prompt for Settings to surface durably.
+            ctx.dataStore.edit { mutablePrefs ->
+                mutablePrefs[LedgerPreferences.LAST_ERROR] = "Couldn't read your saved connection — reconnect."
+            }
             LightJobResult.Error(mapOf("reason" to "decrypt"))
         } else {
             val nowMs = System.currentTimeMillis()
@@ -71,9 +76,16 @@ val simpleFinSyncJob: LightJobHandler = { ctx, _ ->
                     ctx.dataStore.edit { mutablePrefs ->
                         mutablePrefs[LedgerPreferences.LAST_SYNC_EPOCH_MS] = nowMs
                         mutablePrefs[LedgerPreferences.SYNC_START_EPOCH_S] = nowS
+                        // outcome.errors is per-account "reauthenticate"/subscription-lapse
+                        // messaging from the bridge — surface it durably, and clear any stale
+                        // error once a sync comes back clean.
+                        if (outcome.errors.isNotEmpty()) {
+                            mutablePrefs[LedgerPreferences.LAST_ERROR] =
+                                "Bridge says: " + outcome.errors.joinToString("; ")
+                        } else {
+                            mutablePrefs.remove(LedgerPreferences.LAST_ERROR)
+                        }
                     }
-                    // outcome.errors (subscription lapses / "reauthenticate") is intentionally
-                    // unused here — persisting/surfacing it to the user is T7.
                     LightJobResult.Success(mapOf("new" to outcome.newCount.toString()))
                 },
                 onFailure = { error ->
@@ -81,10 +93,19 @@ val simpleFinSyncJob: LightJobHandler = { ctx, _ ->
                         error is CancellationException -> throw error
                         // 403 => revoked token; other 4xx => surfaced client error. Neither is
                         // transient, so don't retry — Settings prompts the user to reconnect.
-                        error is SimpleFinHttpException && error.statusCode in 400..499 ->
+                        error is SimpleFinHttpException && error.statusCode in 400..499 -> {
+                            ctx.dataStore.edit { mutablePrefs ->
+                                mutablePrefs[LedgerPreferences.LAST_ERROR] = if (error.statusCode == 403) {
+                                    "Connection expired — reconnect."
+                                } else {
+                                    "Sync error (${error.statusCode}) — reconnect."
+                                }
+                            }
                             LightJobResult.Error(mapOf("reason" to error.statusCode.toString()))
+                        }
                         // IOException, 5xx (surfaced as SimpleFinHttpException outside 4xx), or
                         // anything else unexpected: transient, let WorkManager back off and retry.
+                        // No LAST_ERROR write here — a retry isn't a durable, user-facing state.
                         else -> LightJobResult.Retry
                     }
                 },
