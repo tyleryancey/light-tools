@@ -27,9 +27,6 @@ interface LedgerRepository {
     /** Look up an existing row already linked to this account+externalId (idempotent re-sync). */
     suspend fun findTransactionByExternal(accountId: Long, externalId: String): TxnRef?
 
-    /** Candidate rows sharing a dedup hash, for cross-source dedup matching. */
-    suspend fun findDedupCandidates(dedupHash: String): List<TxnRef>
-
     /** Insert a brand-new externally sourced (SIMPLEFIN) transaction; returns the new id. */
     suspend fun insertExternalTransaction(
         accountId: Long,

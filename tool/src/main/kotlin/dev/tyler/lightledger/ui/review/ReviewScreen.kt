@@ -29,7 +29,7 @@ import dev.tyler.lightledger.data.Category
 import dev.tyler.lightledger.data.LedgerRepository
 import dev.tyler.lightledger.data.ReviewItem
 import dev.tyler.lightledger.ui.shared.CategoryGrid
-import java.time.LocalDate
+import dev.tyler.lightledger.ui.shared.LedgerFormat
 
 /**
  * Review-inbox screen: one NEEDS_REVIEW transaction at a time. Tapping a category confirms it
@@ -119,7 +119,7 @@ private fun ItemContent(
         )
 
         LightText(
-            text = formatDate(item.postedEpochDay),
+            text = LedgerFormat.date(item.postedEpochDay),
             variant = LightTextVariant.Detail,
             modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
         )
@@ -129,7 +129,7 @@ private fun ItemContent(
             modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.25f.gridUnitsAsDp()),
         )
         LightText(
-            text = formatAmount(item.amountMinor),
+            text = LedgerFormat.amount(item.amountMinor, item.currency),
             variant = LightTextVariant.Heading,
             modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
         )
@@ -149,14 +149,4 @@ private fun ItemContent(
             items = listOf(LightBarButton.Text(text = "SKIP", onClick = onSkip)),
         )
     }
-}
-
-private fun formatDate(epochDay: Long): String {
-    val date = LocalDate.ofEpochDay(epochDay)
-    return date.month.name.take(3) + " " + date.dayOfMonth + ", " + date.year
-}
-
-private fun formatAmount(amountMinor: Long): String {
-    val format = java.text.NumberFormat.getCurrencyInstance(java.util.Locale.US)
-    return format.format(amountMinor / 100.0)
 }

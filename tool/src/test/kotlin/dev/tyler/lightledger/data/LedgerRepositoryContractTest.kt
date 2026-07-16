@@ -213,38 +213,57 @@ class LedgerRepositoryContractTest {
         assertTrue(inbox.none { it.id == confirmedId })
     }
 
-    @Test fun findDedupCandidatesReturnsRowsSharingHash() = runTest {
+    // I-2: Transaction/ReviewItem must carry the *account's* real currency, never a hard-coded
+    // USD — this is what lets LedgerFormat render History/Review correctly for non-USD accounts.
+    @Test fun transactionsAndReviewItemsCarryTheirAccountsRealCurrency() = runTest {
         val repo = FakeLedgerRepository()
-        val accountId = repo.upsertSimpleFinAccount("acc-1", "Checking", "USD")
-        val id1 = repo.insertExternalTransaction(
-            accountId = accountId,
-            postedEpochDay = 100L,
-            amountMinor = -500L,
-            payee = "Coffee",
+        repo.ensureSeeded()
+        val category = repo.listCategories().first()
+        // addManualTransaction always posts "today" (no postedEpochDay param), so the SIMPLEFIN
+        // rows below use the same day to land in this month's listTransactions range.
+        val today = LocalDate.now().toEpochDay()
+
+        // Seeded MANUAL "Cash" account is USD.
+        val usdTxnId = repo.addManualTransaction(amountMinor = -500L, payee = "USD Store", categoryId = category.id)
+
+        // SIMPLEFIN account with a non-USD currency.
+        val jpyAccountId = repo.upsertSimpleFinAccount("acc-jpy", "Japan Bank", "JPY")
+        val jpyConfirmedId = repo.insertExternalTransaction(
+            accountId = jpyAccountId,
+            postedEpochDay = today,
+            amountMinor = -50000L,
+            payee = "JPY Store",
+            memo = "",
+            categoryId = category.id,
+            status = TransactionStatus.CONFIRMED,
+            externalId = "jpy-confirmed",
+            pendingExternal = false,
+            dedupHash = "jpy-confirmed-hash",
+        )
+        val jpyReviewId = repo.insertExternalTransaction(
+            accountId = jpyAccountId,
+            postedEpochDay = today,
+            amountMinor = -30000L,
+            payee = "JPY Needs Review",
             memo = "",
             categoryId = null,
             status = TransactionStatus.NEEDS_REVIEW,
-            externalId = "txn-1",
+            externalId = "jpy-review",
             pendingExternal = false,
-            dedupHash = "shared-hash",
-        )
-        repo.insertExternalTransaction(
-            accountId = accountId,
-            postedEpochDay = 200L,
-            amountMinor = -999L,
-            payee = "Different",
-            memo = "",
-            categoryId = null,
-            status = TransactionStatus.NEEDS_REVIEW,
-            externalId = "txn-2",
-            pendingExternal = false,
-            dedupHash = "other-hash",
+            dedupHash = "jpy-review-hash",
         )
 
-        val candidates = repo.findDedupCandidates("shared-hash")
+        val transactions = repo.listTransactions(YearMonth.now())
+        assertEquals("USD", transactions.first { it.id == usdTxnId }.currency)
+        assertEquals("JPY", transactions.first { it.id == jpyConfirmedId }.currency)
 
-        assertEquals(1, candidates.size)
-        assertEquals(id1, candidates.first().id)
+        assertEquals("USD", repo.getTransaction(usdTxnId)?.currency)
+        assertEquals("JPY", repo.getTransaction(jpyConfirmedId)?.currency)
+
+        val inbox = repo.listReviewInbox()
+        assertEquals(1, inbox.size)
+        assertEquals(jpyReviewId, inbox.first().id)
+        assertEquals("JPY", inbox.first().currency)
     }
 
     @Test fun insertRuleAndListRulesRoundTrip() = runTest {

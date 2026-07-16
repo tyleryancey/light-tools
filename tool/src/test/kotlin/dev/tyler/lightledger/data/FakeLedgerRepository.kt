@@ -136,11 +136,19 @@ class FakeLedgerRepository : LedgerRepository {
         val range = LedgerMath.epochDayRange(month)
         return transactions.filter { it.status == TransactionStatus.CONFIRMED && it.postedEpochDay in range }
             .sortedWith(compareByDescending<FakeTxn> { it.postedEpochDay }.thenByDescending { it.id })
-            .map { it.toTransaction() }
+            // Mirrors Room's INNER JOIN accounts: a row whose account no longer exists is
+            // dropped, and the currency always comes from the account, never a hard-coded default.
+            .mapNotNull { txn ->
+                val currency = accounts.firstOrNull { it.id == txn.accountId }?.currency ?: return@mapNotNull null
+                txn.toTransaction(currency)
+            }
     }
 
-    override suspend fun getTransaction(id: Long): Transaction? =
-        transactions.firstOrNull { it.id == id }?.toTransaction()
+    override suspend fun getTransaction(id: Long): Transaction? {
+        val txn = transactions.firstOrNull { it.id == id } ?: return null
+        val currency = accounts.firstOrNull { it.id == txn.accountId }?.currency ?: return null
+        return txn.toTransaction(currency)
+    }
 
     override suspend fun updateTransactionCategory(id: Long, categoryId: Long) {
         transactions.firstOrNull { it.id == id }?.categoryId = categoryId
@@ -171,9 +179,6 @@ class FakeLedgerRepository : LedgerRepository {
 
     override suspend fun findTransactionByExternal(accountId: Long, externalId: String): TxnRef? =
         transactions.firstOrNull { it.accountId == accountId && it.externalId == externalId }?.toTxnRef()
-
-    override suspend fun findDedupCandidates(dedupHash: String): List<TxnRef> =
-        transactions.filter { it.dedupHash == dedupHash }.map { it.toTxnRef() }
 
     override suspend fun insertExternalTransaction(
         accountId: Long,
@@ -230,16 +235,18 @@ class FakeLedgerRepository : LedgerRepository {
         transactions.filter { it.status == TransactionStatus.NEEDS_REVIEW }
             .sortedWith(compareByDescending<FakeTxn> { it.postedEpochDay }.thenByDescending { it.id })
             // Mirrors Room's INNER JOIN accounts: a row whose account no longer exists is
-            // dropped, not shown with a blank account name.
+            // dropped, not shown with a blank account name, and the currency always comes from
+            // the account, never a hard-coded default.
             .mapNotNull { txn ->
-                val accountName = accounts.firstOrNull { it.id == txn.accountId }?.name ?: return@mapNotNull null
+                val account = accounts.firstOrNull { it.id == txn.accountId } ?: return@mapNotNull null
                 ReviewItem(
                     id = txn.id,
                     postedEpochDay = txn.postedEpochDay,
                     amountMinor = txn.amountMinor,
                     payee = txn.payee,
-                    accountName = accountName,
+                    accountName = account.name,
                     categoryId = txn.categoryId,
+                    currency = account.currency,
                 )
             }
 
@@ -314,7 +321,7 @@ class FakeLedgerRepository : LedgerRepository {
             it.postedEpochDay in minEpochDay..maxEpochDay
     }.map { it.toTxnRef() }
 
-    private fun FakeTxn.toTransaction() = Transaction(
+    private fun FakeTxn.toTransaction(currency: String) = Transaction(
         id = id,
         accountId = accountId,
         postedEpochDay = postedEpochDay,
@@ -322,6 +329,7 @@ class FakeLedgerRepository : LedgerRepository {
         payee = payee,
         memo = memo,
         categoryId = categoryId,
+        currency = currency,
     )
 
     private fun FakeTxn.toTxnRef() = TxnRef(

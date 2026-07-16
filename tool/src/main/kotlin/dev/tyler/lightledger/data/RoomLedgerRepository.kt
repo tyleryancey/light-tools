@@ -102,11 +102,11 @@ class RoomLedgerRepository private constructor(
 
     override suspend fun listTransactions(month: YearMonth): List<Transaction> = withContext(Dispatchers.IO) {
         val range = LedgerMath.epochDayRange(month)
-        transactionDao.listConfirmedInRange(range.first, range.last).map { it.toDomain() }
+        transactionDao.listConfirmedInRange(range.first, range.last)
     }
 
     override suspend fun getTransaction(id: Long): Transaction? = withContext(Dispatchers.IO) {
-        transactionDao.getById(id)?.toDomain()
+        transactionDao.getById(id)
     }
 
     override suspend fun updateTransactionCategory(id: Long, categoryId: Long): Unit = withContext(Dispatchers.IO) {
@@ -148,10 +148,6 @@ class RoomLedgerRepository private constructor(
         withContext(Dispatchers.IO) {
             transactionDao.findByExternalId(accountId, externalId)?.toTxnRef()
         }
-
-    override suspend fun findDedupCandidates(dedupHash: String): List<TxnRef> = withContext(Dispatchers.IO) {
-        transactionDao.findByDedupHash(dedupHash).map { it.toTxnRef() }
-    }
 
     override suspend fun insertExternalTransaction(
         accountId: Long,
@@ -276,16 +272,6 @@ class RoomLedgerRepository private constructor(
 }
 
 private fun CategoryEntity.toDomain() = Category(id = id, name = name, sortOrder = sortOrder)
-
-private fun TransactionEntity.toDomain() = Transaction(
-    id = id,
-    accountId = accountId,
-    postedEpochDay = postedEpochDay,
-    amountMinor = amountMinor,
-    payee = payee,
-    memo = memo,
-    categoryId = categoryId,
-)
 
 private fun TransactionEntity.toTxnRef() = TxnRef(
     id = id,

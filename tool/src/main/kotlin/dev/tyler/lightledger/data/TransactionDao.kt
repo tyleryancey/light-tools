@@ -9,15 +9,30 @@ internal interface TransactionDao {
     @Insert
     fun insert(transaction: TransactionEntity): Long
 
+    /**
+     * Currency-aware projection for History: joins the account's real currency so a non-USD
+     * account's transactions never render hard-coded USD (mirrors [listNeedsReviewWithAccount]'s
+     * INNER JOIN and [listConfirmedAmountsInRange]'s currency projection).
+     */
     @Query(
-        "SELECT * FROM transactions WHERE status = 'CONFIRMED' " +
-            "AND postedEpochDay BETWEEN :startEpochDay AND :endEpochDay " +
-            "ORDER BY postedEpochDay DESC, id DESC",
+        "SELECT t.id AS id, t.accountId AS accountId, t.postedEpochDay AS postedEpochDay, " +
+            "t.amountMinor AS amountMinor, t.payee AS payee, t.memo AS memo, t.categoryId AS categoryId, " +
+            "a.currency AS currency " +
+            "FROM transactions t INNER JOIN accounts a ON t.accountId = a.id " +
+            "WHERE t.status = 'CONFIRMED' AND t.postedEpochDay BETWEEN :startEpochDay AND :endEpochDay " +
+            "ORDER BY t.postedEpochDay DESC, t.id DESC",
     )
-    fun listConfirmedInRange(startEpochDay: Long, endEpochDay: Long): List<TransactionEntity>
+    fun listConfirmedInRange(startEpochDay: Long, endEpochDay: Long): List<Transaction>
 
-    @Query("SELECT * FROM transactions WHERE id = :id")
-    fun getById(id: Long): TransactionEntity?
+    /** Currency-aware single-row projection backing [RoomLedgerRepository.getTransaction]. */
+    @Query(
+        "SELECT t.id AS id, t.accountId AS accountId, t.postedEpochDay AS postedEpochDay, " +
+            "t.amountMinor AS amountMinor, t.payee AS payee, t.memo AS memo, t.categoryId AS categoryId, " +
+            "a.currency AS currency " +
+            "FROM transactions t INNER JOIN accounts a ON t.accountId = a.id " +
+            "WHERE t.id = :id",
+    )
+    fun getById(id: Long): Transaction?
 
     @Query("UPDATE transactions SET categoryId = :categoryId WHERE id = :id")
     fun updateCategory(id: Long, categoryId: Long): Int
@@ -34,12 +49,9 @@ internal interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE accountId = :accountId AND externalId = :externalId LIMIT 1")
     fun findByExternalId(accountId: Long, externalId: String): TransactionEntity?
 
-    @Query("SELECT * FROM transactions WHERE dedupHash = :dedupHash")
-    fun findByDedupHash(dedupHash: String): List<TransactionEntity>
-
     @Query(
         "SELECT t.id AS id, t.postedEpochDay AS postedEpochDay, t.amountMinor AS amountMinor, " +
-            "t.payee AS payee, a.name AS accountName, t.categoryId AS categoryId " +
+            "t.payee AS payee, a.name AS accountName, t.categoryId AS categoryId, a.currency AS currency " +
             "FROM transactions t INNER JOIN accounts a ON t.accountId = a.id " +
             "WHERE t.status = 'NEEDS_REVIEW' " +
             "ORDER BY t.postedEpochDay DESC, t.id DESC",

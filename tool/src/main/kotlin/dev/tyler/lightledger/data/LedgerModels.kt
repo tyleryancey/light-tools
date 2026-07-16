@@ -10,6 +10,7 @@ data class Transaction(
     val payee: String,
     val memo: String,
     val categoryId: Long?,
+    val currency: String,
 )
 
 data class CategoryMonthTotal(
@@ -27,6 +28,7 @@ data class ReviewItem(
     val payee: String,
     val accountName: String,
     val categoryId: Long?,
+    val currency: String,
 )
 
 /**

@@ -31,6 +31,7 @@ import dev.tyler.lightledger.data.Category
 import dev.tyler.lightledger.data.LedgerRepository
 import dev.tyler.lightledger.data.Transaction
 import dev.tyler.lightledger.ui.shared.CategoryGrid
+import dev.tyler.lightledger.ui.shared.LedgerFormat
 import java.time.YearMonth
 
 class HistoryScreen(
@@ -100,7 +101,7 @@ private fun ListContent(
             ) {
                 items(transactions, key = { it.id }) { transaction ->
                     LightText(
-                        text = "${transaction.payee}  ${formatAmount(transaction.amountMinor)}",
+                        text = "${transaction.payee}  ${LedgerFormat.amount(transaction.amountMinor, transaction.currency)}",
                         variant = LightTextVariant.Copy,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -132,7 +133,7 @@ private fun DetailContent(
         )
 
         LightText(
-            text = formatAmount(transaction.amountMinor),
+            text = LedgerFormat.amount(transaction.amountMinor, transaction.currency),
             variant = LightTextVariant.Heading,
             modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
         )
@@ -146,8 +147,3 @@ private fun DetailContent(
 }
 
 private fun monthTitle(month: YearMonth): String = month.month.name.take(3) + " " + month.year
-
-private fun formatAmount(amountMinor: Long): String {
-    val format = java.text.NumberFormat.getCurrencyInstance(java.util.Locale.US)
-    return format.format(amountMinor / 100.0)
-}
