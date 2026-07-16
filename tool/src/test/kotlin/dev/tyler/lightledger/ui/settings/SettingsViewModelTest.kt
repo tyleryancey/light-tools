@@ -149,4 +149,69 @@ class SettingsViewModelTest {
         val prefs = dataStore.data.first()
         assertNull(prefs[LedgerPreferences.LAST_ERROR])
     }
+
+    @Test
+    fun reloadSurfacesSeededBackgroundSyncPrefs() = runTest {
+        val repository = FakeLedgerRepository()
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.BACKGROUND_SYNC_ENABLED] = true
+            it[LedgerPreferences.BACKGROUND_SYNC_HOURS] = 6L
+        }
+
+        val vm = SettingsViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.backgroundSyncEnabled)
+        assertEquals(6, vm.uiState.value.backgroundSyncHours)
+    }
+
+    @Test
+    fun noBackgroundSyncKeysLeaveDefaults() = runTest {
+        val repository = FakeLedgerRepository()
+        val vm = SettingsViewModel(repository, dataStore)
+
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.backgroundSyncEnabled)
+        assertEquals(12, vm.uiState.value.backgroundSyncHours)
+    }
+
+    @Test
+    fun setBackgroundSyncPersistsToDataStoreAndUpdatesState() = runTest {
+        val repository = FakeLedgerRepository()
+        val vm = SettingsViewModel(repository, dataStore)
+        advanceUntilIdle()
+
+        vm.setBackgroundSync(true, 24)
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.backgroundSyncEnabled)
+        assertEquals(24, vm.uiState.value.backgroundSyncHours)
+        val prefs = dataStore.data.first()
+        assertEquals(true, prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED])
+        assertEquals(24L, prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS])
+    }
+
+    @Test
+    fun disconnectClearsBackgroundSyncPrefsAndResetsToDefaults() = runTest {
+        val repository = FakeLedgerRepository()
+        dataStore.edit {
+            it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob"
+            it[LedgerPreferences.BACKGROUND_SYNC_ENABLED] = true
+            it[LedgerPreferences.BACKGROUND_SYNC_HOURS] = 6L
+        }
+        val vm = SettingsViewModel(repository, dataStore)
+        advanceUntilIdle()
+        assertTrue(vm.uiState.value.backgroundSyncEnabled)
+
+        vm.disconnect()
+        advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.backgroundSyncEnabled)
+        assertEquals(12, vm.uiState.value.backgroundSyncHours)
+        val prefs = dataStore.data.first()
+        assertNull(prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED])
+        assertNull(prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS])
+    }
 }

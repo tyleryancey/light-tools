@@ -19,6 +19,8 @@ data class SettingsUiState(
     val accountNames: List<String> = emptyList(),
     val loading: Boolean = true,
     val bridgeError: String? = null,
+    val backgroundSyncEnabled: Boolean = false,
+    val backgroundSyncHours: Int = 12,
 )
 
 /**
@@ -53,12 +55,30 @@ class SettingsViewModel(
             val connected = prefs[LedgerPreferences.ACCESS_BLOB] != null
             val accountNames = repository.listSimpleFinAccounts()
             val bridgeError = prefs[LedgerPreferences.LAST_ERROR]
+            val backgroundSyncEnabled = prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED] ?: false
+            val backgroundSyncHours = (prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS] ?: 12L).toInt()
             _uiState.value = SettingsUiState(
                 connected = connected,
                 accountNames = accountNames,
                 loading = false,
                 bridgeError = bridgeError,
+                backgroundSyncEnabled = backgroundSyncEnabled,
+                backgroundSyncHours = backgroundSyncHours,
             )
+        }
+    }
+
+    /** Persists the background-sync toggle + interval and reflects them in [uiState]. The
+     * Screen is responsible for calling `LightWork.enqueuePeriodic`/`cancel` against
+     * [dev.tyler.lightledger.data.SIMPLEFIN_PERIODIC_TAG] in response (Task 4) — this VM only
+     * owns the DataStore-backed preference, staying Android/LightWork-free. */
+    fun setBackgroundSync(enabled: Boolean, hours: Int) {
+        viewModelScope.launch {
+            dataStore.edit { prefs ->
+                prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED] = enabled
+                prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS] = hours.toLong()
+            }
+            _uiState.value = _uiState.value.copy(backgroundSyncEnabled = enabled, backgroundSyncHours = hours)
         }
     }
 
@@ -71,9 +91,18 @@ class SettingsViewModel(
                 prefs.remove(LedgerPreferences.LAST_SYNC_EPOCH_MS)
                 prefs.remove(LedgerPreferences.SYNC_START_EPOCH_S)
                 prefs.remove(LedgerPreferences.LAST_ERROR)
+                prefs.remove(LedgerPreferences.BACKGROUND_SYNC_ENABLED)
+                prefs.remove(LedgerPreferences.BACKGROUND_SYNC_HOURS)
             }
             repository.deleteSimpleFinData()
-            _uiState.value = SettingsUiState(connected = false, accountNames = emptyList(), loading = false, bridgeError = null)
+            _uiState.value = SettingsUiState(
+                connected = false,
+                accountNames = emptyList(),
+                loading = false,
+                bridgeError = null,
+                backgroundSyncEnabled = false,
+                backgroundSyncHours = 12,
+            )
         }
     }
 }
