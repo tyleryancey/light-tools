@@ -26,14 +26,19 @@ import dev.tyler.lightledger.simplefin.SimpleFinClient
 private const val DEFAULT_TITLE = "SimpleFIN Setup Token"
 
 /**
- * Paste-to-connect screen (CLAUDE-light-ledger.md §6.1, §7). QR-scan connect is deferred to
- * M3b — this is the paste-only M3a flow. Mirrors the M2 "editor" screens (AddEntry's payee
- * step, Categories' add flow): a single [LightTextInputEditor] wired to
+ * Paste-to-connect screen (CLAUDE-light-ledger.md §6.1, §7). Mirrors the M2 "editor" screens
+ * (AddEntry's payee step, Categories' add flow): a single [LightTextInputEditor] wired to
  * [SimpleFinConnectViewModel.submit], swapping its title to the calm error copy on failure so
  * the user can edit and retry in place without a new UI idiom.
+ *
+ * [initialToken], when non-null, is a token handed back from
+ * [SimpleFinQrScannerScreen] (M3b's QR-scan connect entry) — it auto-submits once so the
+ * scan flows straight into the same claim path as a paste. On failure the editor still
+ * appears (via the normal [ConnectStatus.Error] branch) so the user can retry by pasting.
  */
 class SimpleFinConnectScreen(
     sealedActivity: SealedLightActivity,
+    private val initialToken: String? = null,
 ) : LightScreen<Unit, SimpleFinConnectViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<SimpleFinConnectViewModel>
@@ -51,6 +56,10 @@ class SimpleFinConnectScreen(
         val state by viewModel.uiState.collectAsState()
         val tokenFieldState = rememberTextFieldState()
         val keyboardOptionsFlow = rememberKeyboardOptions()
+
+        LaunchedEffect(Unit) {
+            if (initialToken != null) viewModel.submit(initialToken)
+        }
 
         LaunchedEffect(state.status) {
             if (state.status == ConnectStatus.Connected) goBack(Unit)

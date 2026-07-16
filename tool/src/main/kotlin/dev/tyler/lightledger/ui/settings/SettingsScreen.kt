@@ -171,21 +171,43 @@ class SettingsScreen(
                             },
                         )
 
-                        else -> LightText(
-                            text = "SimpleFIN",
-                            variant = LightTextVariant.Copy,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .lightClickable {
-                                    navigateTo(screenFactory = { SimpleFinConnectScreen(it) }) {
-                                        // The connect screen already goes back on success, but
-                                        // reload defensively so the section flips to "connected"
-                                        // even if onScreenShow's own reload raced it.
-                                        viewModel.reload()
+                        else -> Column(modifier = Modifier.fillMaxWidth()) {
+                            LightText(
+                                text = "SimpleFIN",
+                                variant = LightTextVariant.Copy,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .lightClickable {
+                                        navigateTo(screenFactory = { SimpleFinConnectScreen(it) }) {
+                                            // The connect screen already goes back on success, but
+                                            // reload defensively so the section flips to "connected"
+                                            // even if onScreenShow's own reload raced it.
+                                            viewModel.reload()
+                                        }
                                     }
-                                }
-                                .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
-                        )
+                                    .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+                            )
+
+                            // M3b QR-scan connect: a second entry that hands the scanned
+                            // token to a fresh SimpleFinConnectScreen via `initialToken`,
+                            // which auto-submits it through the same claim path as paste.
+                            LightText(
+                                text = "Scan QR",
+                                variant = LightTextVariant.Copy,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .lightClickable {
+                                        navigateTo(screenFactory = { SimpleFinQrScannerScreen(it) }) { token ->
+                                            if (token != null) {
+                                                navigateTo(screenFactory = { SimpleFinConnectScreen(it, initialToken = token) }) {
+                                                    viewModel.reload()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+                            )
+                        }
                     }
                 }
             }
