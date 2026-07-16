@@ -30,8 +30,10 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import dev.tyler.lightledger.data.LedgerRepository
+import dev.tyler.lightledger.data.SIMPLEFIN_PERIODIC_JOB_KEY
 import dev.tyler.lightledger.data.SIMPLEFIN_SYNC_JOB_KEY
 import dev.tyler.lightledger.ui.categories.CategoriesScreen
+import kotlin.time.Duration.Companion.hours
 import kotlinx.coroutines.delay
 
 /** How long the "synced" status stays up before clearing, so it reads as a calm confirmation
@@ -129,10 +131,43 @@ class SettingsScreen(
                             accountNames = state.accountNames,
                             statusText = syncStatusText,
                             bridgeError = state.bridgeError,
+                            backgroundSyncEnabled = state.backgroundSyncEnabled,
+                            backgroundSyncHours = state.backgroundSyncHours,
                             onSyncNow = { LightWork.enqueue(lightContext, SIMPLEFIN_SYNC_JOB_KEY) },
                             onDisconnect = {
                                 LightWork.cancel(lightContext, SIMPLEFIN_SYNC_JOB_KEY)
+                                LightWork.cancel(lightContext, SIMPLEFIN_PERIODIC_JOB_KEY)
                                 viewModel.disconnect()
+                            },
+                            onToggleBackgroundSync = {
+                                val nowEnabled = !state.backgroundSyncEnabled
+                                viewModel.setBackgroundSync(nowEnabled, state.backgroundSyncHours)
+                                if (nowEnabled) {
+                                    LightWork.enqueuePeriodic(
+                                        lightContext,
+                                        SIMPLEFIN_SYNC_JOB_KEY,
+                                        state.backgroundSyncHours.hours,
+                                        tag = SIMPLEFIN_PERIODIC_JOB_KEY,
+                                    )
+                                } else {
+                                    LightWork.cancel(lightContext, SIMPLEFIN_PERIODIC_JOB_KEY)
+                                }
+                            },
+                            onCycleInterval = {
+                                val next = when (state.backgroundSyncHours) {
+                                    6 -> 12
+                                    12 -> 24
+                                    else -> 6
+                                }
+                                viewModel.setBackgroundSync(state.backgroundSyncEnabled, next)
+                                if (state.backgroundSyncEnabled) {
+                                    LightWork.enqueuePeriodic(
+                                        lightContext,
+                                        SIMPLEFIN_SYNC_JOB_KEY,
+                                        next.hours,
+                                        tag = SIMPLEFIN_PERIODIC_JOB_KEY,
+                                    )
+                                }
                             },
                         )
 
@@ -163,8 +198,12 @@ private fun ConnectedSimpleFinSection(
     accountNames: List<String>,
     statusText: String?,
     bridgeError: String?,
+    backgroundSyncEnabled: Boolean,
+    backgroundSyncHours: Int,
     onSyncNow: () -> Unit,
     onDisconnect: () -> Unit,
+    onToggleBackgroundSync: () -> Unit,
+    onCycleInterval: () -> Unit,
 ) {
     LightText(
         text = "SimpleFIN",
@@ -200,6 +239,38 @@ private fun ConnectedSimpleFinSection(
     bridgeError?.let {
         LightText(
             text = it,
+            variant = LightTextVariant.Detail,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.25f.gridUnitsAsDp()),
+        )
+    }
+
+    LightText(
+        text = "Background refresh: " +
+            if (backgroundSyncEnabled) "every ${backgroundSyncHours}h" else "Off",
+        variant = LightTextVariant.Copy,
+        modifier = Modifier
+            .fillMaxWidth()
+            .lightClickable(onClick = onToggleBackgroundSync)
+            .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+    )
+
+    if (backgroundSyncEnabled) {
+        LightText(
+            text = "Interval: ${backgroundSyncHours}h (tap to change)",
+            variant = LightTextVariant.Copy,
+            modifier = Modifier
+                .fillMaxWidth()
+                .lightClickable(onClick = onCycleInterval)
+                .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+        )
+
+        // LightOS batches background work behind Doze/App Standby, so a scheduled refresh
+        // can run later than the chosen interval — set expectations rather than imply a
+        // live clock.
+        LightText(
+            text = "LightOS batches background work — it may run late on battery.",
             variant = LightTextVariant.Detail,
             modifier = Modifier
                 .fillMaxWidth()
