@@ -24,8 +24,8 @@ import kotlinx.coroutines.withContext
 
 enum class InputMode { NORMAL, CANDIDATE }
 
-/** Which edge the floating keypad docks to — the half of the board opposite the selected cell. */
-enum class KeypadDock { TOP, BOTTOM }
+/** Which screen margin the floating keypad docks to. */
+enum class KeypadDock { TOP, BOTTOM, LEFT, RIGHT }
 
 /** Transient UI as synchronous state so onBackPressed() can answer "is something open?". */
 sealed interface Overlay {
@@ -62,6 +62,9 @@ data class GameUiState(
     val autoRemoved: IntArray = IntArray(81),  // bits the user turned off while auto was on
     val checkErr: BooleanArray = BooleanArray(81),
     val selected: Int = -1,
+    // Rendered keypad margin (transient): set directly by a flick, else auto-avoided from the
+    // preferred margin (settings.keypadMargin) on each selection. See keypadDock()/setKeypadMargin().
+    val keypadDockNow: KeypadDock = KeypadDock.BOTTOM,
     val mode: InputMode = InputMode.NORMAL,
     val autoCandidate: Boolean = false,
     val undo: List<UndoFrame> = emptyList(),
@@ -131,6 +134,7 @@ class GameViewModel(
             lockedMask = locked, candidates = cand, autoAdded = autoAdd, autoRemoved = autoRem,
             checkErr = BooleanArray(81),
             selected = -1, mode = InputMode.NORMAL, autoCandidate = auto,
+            keypadDockNow = marginPref(settings),
             undo = emptyList(), solved = solved, usedReveal = usedReveal,
             elapsedSec = elapsed, running = false, settings = settings,
         )
@@ -302,7 +306,9 @@ class GameViewModel(
     }
 
     // ---------- selection / input ----------
-    fun select(i: Int) { _ui.value = s.copy(selected = i, elapsedSec = elapsedSec()) }
+    fun select(i: Int) {
+        _ui.value = s.copy(selected = i, keypadDockNow = keypadDock(i, marginPref()), elapsedSec = elapsedSec())
+    }
 
     // The switcher and keypad stay live in both modes; auto candidate mode only changes
     // which candidate layer the pencil marks come from (see pencilMask).
@@ -358,15 +364,50 @@ class GameViewModel(
      */
     fun shouldShowKeypad(): Boolean = canEdit(s.selected)
 
+    /** The preferred keypad margin from [settings] (defaults to the live settings), as a KeypadDock
+     *  (BOTTOM on any bad/unknown stored value). */
+    private fun marginPref(settings: Settings = s.settings): KeypadDock =
+        runCatching { KeypadDock.valueOf(settings.keypadMargin) }.getOrDefault(KeypadDock.BOTTOM)
+
+    /** True if a keypad docked at [m] would cover [i]'s 3-cell band (rows for TOP/BOTTOM, cols for LEFT/RIGHT). */
+    private fun hides(m: KeypadDock, i: Int): Boolean = when (m) {
+        KeypadDock.TOP -> i / 9 in 0..2
+        KeypadDock.BOTTOM -> i / 9 in 6..8
+        KeypadDock.LEFT -> i % 9 in 0..2
+        KeypadDock.RIGHT -> i % 9 in 6..8
+    }
+
+    private fun opposite(m: KeypadDock): KeypadDock = when (m) {
+        KeypadDock.TOP -> KeypadDock.BOTTOM
+        KeypadDock.BOTTOM -> KeypadDock.TOP
+        KeypadDock.LEFT -> KeypadDock.RIGHT
+        KeypadDock.RIGHT -> KeypadDock.LEFT
+    }
+
     /**
-     * Which half of the board the floating keypad docks on: the half OPPOSITE the selected cell, so
-     * the selected cell (and the rows around it) stay visible while you enter a number. Low rows (5–8)
-     * dock the panel at the TOP; upper rows (0–4) dock it at the BOTTOM. [selected] == -1 returns
-     * BOTTOM deterministically (unused — the keypad is hidden with no selection). Pure so the UI can
-     * pass [GameUiState.selected] as a Compose state read (guaranteeing the panel repositions).
+     * Auto-avoid placement: dock at the [preferred] margin unless it would hide the selected cell, in
+     * which case use the OPPOSITE margin. A cell in one margin's 3-cell band can't be in its opposite's
+     * band, so the opposite always un-hides it. Pure — this is the SELECTION-time transition; an
+     * explicit flick sets [GameUiState.keypadDockNow] directly (see [setKeypadMargin]) and thus wins
+     * over this. [selected] == -1 -> preferred unchanged (keypad hidden anyway).
      */
-    fun keypadDock(selected: Int): KeypadDock =
-        if (selected >= 0 && selected / 9 >= 5) KeypadDock.TOP else KeypadDock.BOTTOM
+    fun keypadDock(selected: Int, preferred: KeypadDock): KeypadDock =
+        if (selected < 0 || !hides(preferred, selected)) preferred else opposite(preferred)
+
+    /**
+     * Flick handler: an explicit user flick is authoritative — dock the keypad at [m] right now even if
+     * [m] covers the current cell (the user asked for it there) — and persist [m] as the preferred
+     * margin the keypad returns to on later selections.
+     */
+    fun setKeypadMargin(m: KeypadDock) {
+        val next = s.settings.copy(keypadMargin = m.name)
+        _ui.value = s.copy(keypadDockNow = m, settings = next)
+        // Shield the write like persistProgressWith: popping the screen cancels viewModelScope, and a
+        // bare launch could drop the preference mid-write. Encode the captured value, not the getter.
+        viewModelScope.launch {
+            withContext(NonCancellable) { store.set(StoreKeys.SETTINGS, Codecs.encodeSettings(next)) }
+        }
+    }
 
     private fun pushUndo(i: Int): List<UndoFrame> =
         (s.undo + UndoFrame(
@@ -447,7 +488,7 @@ class GameViewModel(
         _ui.value = s.copy(
             values = values, candidates = cand, checkErr = err, lockedMask = locked,
             autoAdded = added, autoRemoved = removed,
-            selected = u.i, undo = s.undo.dropLast(1),
+            selected = u.i, keypadDockNow = keypadDock(u.i, marginPref()), undo = s.undo.dropLast(1),
         )
         persistProgressSoon()
     }
@@ -468,7 +509,7 @@ class GameViewModel(
         val g = SudokuEngine.logicalSolve(s.values, 7)
         val target = g.firstStep?.index ?: s.values.indexOfFirst { it == 0 }
         if (target < 0) { toast("Nothing to point to"); return }
-        _ui.value = s.copy(selected = target)
+        _ui.value = s.copy(selected = target, keypadDockNow = keypadDock(target, marginPref()))
         toast(if (g.firstStep != null) "This square is solvable next" else "Try this square")
     }
 

@@ -21,6 +21,13 @@ class CodecsTest {
         assertTrue(Codecs.encodeSettings(s).contains("\"__v\":2"))
     }
 
+    @Test fun settingsRoundTripCarriesKeypadMargin() {
+        val s = Settings(keypadMargin = "LEFT")
+        assertEquals("LEFT", Codecs.decodeSettings(Codecs.encodeSettings(s)).keypadMargin)
+        // an old blob without the field (still __v=2) decodes to the default margin, not a reset
+        assertEquals("BOTTOM", Codecs.decodeSettings("""{"__v":2,"rowcol":true}""").keypadMargin)
+    }
+
     @Test fun progressRoundTrip() {
         val p = ProgressDto(
             v = List(81) { it % 10 }, c = List(81) { 0 }, l = List(81) { 0 },

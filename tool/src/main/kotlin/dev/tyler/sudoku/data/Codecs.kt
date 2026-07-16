@@ -16,6 +16,9 @@ data class Settings(
     val timer: Boolean = false,
     val sound: Boolean = false,
     val plain: Boolean = false,
+    /** Preferred floating-keypad margin — the enum name of the UI's KeypadDock (TOP/BOTTOM/LEFT/RIGHT).
+     *  Stored as a String so this data-layer type stays independent of the UI enum. */
+    val keypadMargin: String = "BOTTOM",
 )
 
 @Serializable
@@ -25,6 +28,8 @@ internal data class SettingsDto(
     val conflicts: Boolean = false, val checkOnEntry: Boolean = false,
     val autoStart: Boolean = false, val timer: Boolean = false,
     val sound: Boolean = false, val plain: Boolean = false,
+    // New in v1.3; defaulted so older __v=2 blobs (without it) still decode to BOTTOM, not a reset.
+    val keypadMargin: String = "BOTTOM",
 )
 
 /**
@@ -56,6 +61,7 @@ object Codecs {
             rowcol = s.rowcol, box = s.box, same = s.same, conflicts = s.conflicts,
             checkOnEntry = s.checkOnEntry, autoStart = s.autoStart,
             timer = s.timer, sound = s.sound, plain = s.plain,
+            keypadMargin = s.keypadMargin,
         )
     )
 
@@ -67,6 +73,7 @@ object Codecs {
             rowcol = dto.rowcol, box = dto.box, same = dto.same, conflicts = dto.conflicts,
             checkOnEntry = dto.checkOnEntry, autoStart = dto.autoStart,
             timer = dto.timer, sound = dto.sound, plain = dto.plain,
+            keypadMargin = dto.keypadMargin,
         )
     }
 
