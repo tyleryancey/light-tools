@@ -6,11 +6,11 @@ package dev.tyler.lightledger.data
  * A typo in a duplicated literal would silently make `LightWork.enqueue` a no-op. */
 const val SIMPLEFIN_SYNC_JOB_KEY = "simplefin-sync"
 
-/** Distinct WorkManager unique-work slot for the periodic background-sync schedule. Must differ
+/** Distinct WorkManager unique-work name for the periodic background-sync schedule. Must differ
  * from [SIMPLEFIN_SYNC_JOB_KEY] — otherwise scheduling the periodic job and the one-shot
  * "Sync now" job would collide on the same unique-work name, and enqueuing one would silently
  * cancel the other. */
-const val SIMPLEFIN_PERIODIC_TAG = "simplefin-sync-periodic"
+const val SIMPLEFIN_PERIODIC_JOB_KEY = "simplefin-sync-periodic"
 
 object AccountKind {
     const val MANUAL = "MANUAL"

@@ -175,13 +175,22 @@ class SettingsViewModelTest {
 
         assertFalse(vm.uiState.value.backgroundSyncEnabled)
         assertEquals(12, vm.uiState.value.backgroundSyncHours)
+        // loading starts true (SettingsUiState() default) and only reload() flips it false —
+        // proves this state came from reload() actually running, not just the class defaults.
+        assertFalse(vm.uiState.value.loading)
     }
 
     @Test
     fun setBackgroundSyncPersistsToDataStoreAndUpdatesState() = runTest {
         val repository = FakeLedgerRepository()
+        repository.upsertSimpleFinAccount("acc-1", "Checking", "USD")
+        dataStore.edit { it[LedgerPreferences.ACCESS_BLOB] = "encrypted-blob" }
         val vm = SettingsViewModel(repository, dataStore)
         advanceUntilIdle()
+        // Seed connected=true/accountNames via reload() first so the assertions below can prove
+        // setBackgroundSync's `.copy(...)` preserves them rather than blanking them.
+        assertTrue(vm.uiState.value.connected)
+        assertEquals(listOf("Checking"), vm.uiState.value.accountNames)
 
         vm.setBackgroundSync(true, 24)
         advanceUntilIdle()
@@ -191,6 +200,10 @@ class SettingsViewModelTest {
         val prefs = dataStore.data.first()
         assertEquals(true, prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED])
         assertEquals(24L, prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS])
+        // .copy(...) must preserve the other fields — a refactor to SettingsUiState(...) here
+        // would silently blank connected/accountNames.
+        assertTrue(vm.uiState.value.connected)
+        assertEquals(listOf("Checking"), vm.uiState.value.accountNames)
     }
 
     @Test

@@ -14,13 +14,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+private const val DEFAULT_BACKGROUND_SYNC_ENABLED = false
+private const val DEFAULT_BACKGROUND_SYNC_HOURS = 12
+
 data class SettingsUiState(
     val connected: Boolean = false,
     val accountNames: List<String> = emptyList(),
     val loading: Boolean = true,
     val bridgeError: String? = null,
-    val backgroundSyncEnabled: Boolean = false,
-    val backgroundSyncHours: Int = 12,
+    val backgroundSyncEnabled: Boolean = DEFAULT_BACKGROUND_SYNC_ENABLED,
+    val backgroundSyncHours: Int = DEFAULT_BACKGROUND_SYNC_HOURS,
 )
 
 /**
@@ -55,8 +58,10 @@ class SettingsViewModel(
             val connected = prefs[LedgerPreferences.ACCESS_BLOB] != null
             val accountNames = repository.listSimpleFinAccounts()
             val bridgeError = prefs[LedgerPreferences.LAST_ERROR]
-            val backgroundSyncEnabled = prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED] ?: false
-            val backgroundSyncHours = (prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS] ?: 12L).toInt()
+            val backgroundSyncEnabled =
+                prefs[LedgerPreferences.BACKGROUND_SYNC_ENABLED] ?: DEFAULT_BACKGROUND_SYNC_ENABLED
+            val backgroundSyncHours =
+                (prefs[LedgerPreferences.BACKGROUND_SYNC_HOURS] ?: DEFAULT_BACKGROUND_SYNC_HOURS.toLong()).toInt()
             _uiState.value = SettingsUiState(
                 connected = connected,
                 accountNames = accountNames,
@@ -70,7 +75,7 @@ class SettingsViewModel(
 
     /** Persists the background-sync toggle + interval and reflects them in [uiState]. The
      * Screen is responsible for calling `LightWork.enqueuePeriodic`/`cancel` against
-     * [dev.tyler.lightledger.data.SIMPLEFIN_PERIODIC_TAG] in response (Task 4) — this VM only
+     * [dev.tyler.lightledger.data.SIMPLEFIN_PERIODIC_JOB_KEY] in response (Task 4) — this VM only
      * owns the DataStore-backed preference, staying Android/LightWork-free. */
     fun setBackgroundSync(enabled: Boolean, hours: Int) {
         viewModelScope.launch {
@@ -100,8 +105,8 @@ class SettingsViewModel(
                 accountNames = emptyList(),
                 loading = false,
                 bridgeError = null,
-                backgroundSyncEnabled = false,
-                backgroundSyncHours = 12,
+                backgroundSyncEnabled = DEFAULT_BACKGROUND_SYNC_ENABLED,
+                backgroundSyncHours = DEFAULT_BACKGROUND_SYNC_HOURS,
             )
         }
     }

@@ -9,6 +9,6 @@ object LedgerPreferences {
     val LAST_SYNC_EPOCH_MS = longPreferencesKey("simplefin_last_sync_epoch_ms")
     val SYNC_START_EPOCH_S = longPreferencesKey("simplefin_sync_start_epoch_s")
     val LAST_ERROR = stringPreferencesKey("simplefin_last_error")
-    val BACKGROUND_SYNC_ENABLED = booleanPreferencesKey("background_sync_enabled")
-    val BACKGROUND_SYNC_HOURS = longPreferencesKey("background_sync_hours")
+    val BACKGROUND_SYNC_ENABLED = booleanPreferencesKey("simplefin_background_sync_enabled")
+    val BACKGROUND_SYNC_HOURS = longPreferencesKey("simplefin_background_sync_hours")
 }
