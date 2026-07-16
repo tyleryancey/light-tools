@@ -39,14 +39,13 @@ import dev.tyler.lightledger.data.CategoryMonthTotal
 import dev.tyler.lightledger.data.LedgerDatabase
 import dev.tyler.lightledger.data.RoomLedgerRepository
 import dev.tyler.lightledger.data.SIMPLEFIN_SYNC_JOB_KEY
-import dev.tyler.lightledger.domain.CurrencyExponent
 import dev.tyler.lightledger.domain.LedgerMath
 import dev.tyler.lightledger.ui.addentry.AddEntryScreen
 import dev.tyler.lightledger.ui.history.HistoryScreen
 import dev.tyler.lightledger.ui.review.ReviewScreen
 import dev.tyler.lightledger.ui.settings.SettingsScreen
+import dev.tyler.lightledger.ui.shared.LedgerFormat
 import java.time.YearMonth
-import java.util.Locale
 
 @InitialScreen
 class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeViewModel>(sealedActivity) {
@@ -169,7 +168,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, HomeVi
                     ) {
                         state.categoryTotals.forEach { total ->
                             LightText(
-                                text = "${total.categoryName}  ${formatAmount(total.totalMinor, total.currency)}",
+                                text = "${total.categoryName}  ${LedgerFormat.amount(total.totalMinor, total.currency)}",
                                 variant = LightTextVariant.Copy,
                                 modifier = Modifier.padding(vertical = 0.5f.gridUnitsAsDp()),
                             )
@@ -209,19 +208,5 @@ private fun monthTitle(month: YearMonth): String = month.month.name.take(3) + " 
 // deferred. LedgerMath.primaryCurrencyTotal is the never-sum-across-currencies guard.
 private fun primaryTotalText(totals: List<CategoryMonthTotal>): String {
     val (currency, spendMinor) = LedgerMath.primaryCurrencyTotal(totals) ?: ("USD" to 0L)
-    return formatAmount(spendMinor, currency)
-}
-
-private fun formatAmount(amountMinor: Long, currencyCode: String): String {
-    val format = java.text.NumberFormat.getCurrencyInstance(Locale.US)
-    try {
-        format.currency = java.util.Currency.getInstance(currencyCode)
-    } catch (e: IllegalArgumentException) {
-        // Unknown/invalid ISO 4217 code — fall back to the default USD-formatted instance.
-    }
-    // Scale minor units to major by the currency's own exponent (JPY=0, USD=2, BHD=3) rather than a
-    // fixed /100 — NumberFormat then applies the currency's default fraction digits. Exact via
-    // BigDecimal to avoid float rounding.
-    val major = java.math.BigDecimal.valueOf(amountMinor).movePointLeft(CurrencyExponent.of(currencyCode))
-    return format.format(major)
+    return LedgerFormat.amount(spendMinor, currency)
 }
