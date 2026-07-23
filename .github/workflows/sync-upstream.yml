@@ -114,4 +114,7 @@ jobs:
 
       - name: Skip — conflict-resolution PR already open
         if: steps.check-pr.outputs.existing_pr != ''
-        run: echo "PR #${{ steps.check-pr.outputs.existing_pr }} is already open for ${{ matrix.branch }}; leaving it alone until it's resolved."
+        # Block scalar: on a plain "run:" line, YAML would treat " #..." as a
+        # comment and truncate the script to `echo "PR` (unmatched quote).
+        run: |
+          echo "PR #${{ steps.check-pr.outputs.existing_pr }} is already open for ${{ matrix.branch }}; leaving it alone until it's resolved."
