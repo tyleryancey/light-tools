@@ -2,7 +2,7 @@
 id = "dev.tyler.chess"
 label = "Chess"
 versionCode = 1
-versionName = "0.1"
+versionName = "0.1.0"
 permissions = []
 # change if you run this on an LP3!
 # serverPackage = "com.lightos"
