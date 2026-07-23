@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   sync-main:
-    name: Fast-forward main from lightphone/light-sdk
+    name: Sync main from lightphone/light-sdk
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,12 +30,20 @@ jobs:
           git config user.name "light-tools sync bot"
           git config user.email "actions@users.noreply.github.com"
 
-      - name: Fetch and fast-forward from upstream
+      - name: Fetch and merge from upstream
         id: ff
+        # main carries fork-only commits (this workflow), so a fast-forward can
+        # never succeed — merge instead, recording the incoming upstream commits
+        # in the merge commit body.
         run: |
           git remote add upstream https://github.com/lightphone/light-sdk.git
           git fetch upstream main
-          git merge --ff-only upstream/main
+          summary=$(git log --oneline --no-decorate HEAD..upstream/main)
+          if [ -n "$summary" ]; then
+            git merge upstream/main -m "Merge upstream lightphone/light-sdk main" -m "Upstream changes:" -m "$summary"
+          else
+            echo "Already up to date with upstream."
+          fi
           git push origin main
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -49,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        branch: [sudoku, ledger]
+        branch: [sudoku, ledger, chess]
     steps:
       - name: Checkout ${{ matrix.branch }}
         uses: actions/checkout@v4
@@ -76,7 +84,8 @@ jobs:
         id: merge
         if: steps.check-pr.outputs.existing_pr == ''
         run: |
-          if git merge origin/main --no-edit; then
+          summary=$(git log --oneline --no-decorate HEAD..origin/main)
+          if git merge origin/main -m "Merge main into ${{ matrix.branch }}" -m "Upstream changes:" -m "$summary"; then
             echo "conflict=false" >> "$GITHUB_OUTPUT"
           elif [ -n "$(git ls-files -u)" ]; then
             echo "conflict=true" >> "$GITHUB_OUTPUT"
