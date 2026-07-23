@@ -2,8 +2,13 @@
 id = "dev.tyler.lightledger"
 label = "Ledger"
 versionCode = 1
+<<<<<<< HEAD
 versionName = "0.1.0"
 permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE", "android.permission.CAMERA"]
+=======
+versionName = "1.0.0"
+permissions = ["android.permission.INTERNET"]
+>>>>>>> origin/main
 # change if you run this on an LP3!
 # serverPackage = "com.lightos"
 serverPackage = "com.thelightphone.sdk.emulator"
