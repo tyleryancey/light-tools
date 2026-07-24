@@ -44,7 +44,7 @@ fun GameOverlays(vm: GameViewModel, ui: GameUiState, onPastPuzzles: () -> Unit) 
         Overlay.Menu -> BottomSheet(vm) { MenuMain(vm) }
         Overlay.HintPage -> BottomSheet(vm) { HintPage(vm) }
         Overlay.SettingsSheet -> CenterSheet(vm, scrollable = true) { SettingsSheet(vm, ui.settings) }
-        Overlay.Help -> CenterSheet(vm) { HelpSheet(vm) }
+        Overlay.Help -> CenterSheet(vm, scrollable = true) { HelpSheet(vm) }
         Overlay.ConfirmReset -> CenterSheet(vm) {
             ConfirmSheet(
                 vm, "Reset puzzle",
@@ -86,6 +86,8 @@ private fun BottomSheet(vm: GameViewModel, content: @Composable () -> Unit) {
     }
 }
 
+// ConfirmSheet/WinSheet below still default to scrollable=false and can clip at large
+// system font scales — the same overflow class Help had before it opted into scrollable=true.
 @Composable
 private fun CenterSheet(vm: GameViewModel, scrollable: Boolean = false, content: @Composable () -> Unit) {
     val pal = LocalSudokuPalette.current
